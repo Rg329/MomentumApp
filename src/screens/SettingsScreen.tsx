@@ -244,7 +244,6 @@ const WEEKDAY_OPTIONS: PickerOption<Weekday>[] = (
 export function SettingsScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const {
-    isPremium,
     account,
     onboardingData,
     wakeTime,
@@ -254,6 +253,7 @@ export function SettingsScreen() {
     setPreferences,
   } = useAppStore();
   const pm = usePremium();
+  const isPremium = pm.isPremium;
   const p  = usePersonalization();
 
   const [picker, setPicker] = useState<PickerKind>(null);
@@ -383,7 +383,11 @@ export function SettingsScreen() {
         },
         {
           label: 'Subscription',
-          value: isPremium ? 'Premium' : 'Free',
+          value: isPremium
+            ? pm.isTrialActive
+              ? `Trial · ${pm.trialDaysLeft}d left`
+              : 'Premium'
+            : 'Free',
           icon: 'star-circle-outline',
           onPress: () => navigation.navigate('Premium'),
         },

@@ -5,6 +5,7 @@ import { Platform } from 'react-native';
 import { trackTaskCreated, trackTaskRescheduled } from '../intelligence/eventTracker';
 import { ScheduleBlock } from '../data/mockData';
 import { buildAndSaveUserSchedule } from '../scheduling/scheduleService';
+import { isTrialExpired } from '../monetization/trial';
 
 interface OnboardingData {
   procrastinationType: string | null;
@@ -17,6 +18,8 @@ interface TrialState {
   startedAt: string | null; // ISO string
   endsAt: string | null;    // ISO string
 }
+
+export type { TrialState };
 
 interface AccountProfile {
   name: string | null;
@@ -89,6 +92,7 @@ interface AppState {
   setPreferences:      (data: Partial<AppPreferences>) => void;
   setPremium:          (v: boolean) => void;
   startFreeTrial14d:   () => void;
+  expireTrialIfNeeded: () => boolean;
   incrementGeneration: () => void;
   completeDailyReview: () => void;
 }
@@ -152,7 +156,14 @@ export const useAppStore = create<AppState>()(
       setSleepTime:(v) => set({ sleepTime: v }),
       setPreferences: (data) =>
         set((s) => ({ preferences: { ...s.preferences, ...data } })),
-      setPremium:  (v) => set({ isPremium: v }),
+      setPremium: (v) =>
+        set((s) => ({
+          isPremium: v,
+          // Paid subscription supersedes trial — don't let an old trial flag expire a real sub.
+          trial: v && s.trial.isTrialActive
+            ? { ...s.trial, isTrialActive: false }
+            : s.trial,
+        })),
       startFreeTrial14d: () => {
         const startedAt = new Date();
         const endsAt = new Date(startedAt);
@@ -165,6 +176,17 @@ export const useAppStore = create<AppState>()(
             endsAt: endsAt.toISOString(),
           },
         });
+      },
+      expireTrialIfNeeded: () => {
+        const { isPremium, trial } = useAppStore.getState();
+        if (!isPremium || !trial.isTrialActive || !trial.endsAt) return false;
+        if (!isTrialExpired(trial.endsAt)) return false;
+
+        set({
+          isPremium: false,
+          trial: { ...trial, isTrialActive: false },
+        });
+        return true;
       },
       incrementGeneration: () => {
         const today = new Date().toISOString().split('T')[0];
@@ -197,6 +219,11 @@ export const useAppStore = create<AppState>()(
         lastGenerationDate: state.lastGenerationDate,
         lastDailyReviewDate: state.lastDailyReviewDate,
       }),
+      onRehydrateStorage: () => () => {
+        queueMicrotask(() => {
+          useAppStore.getState().expireTrialIfNeeded();
+        });
+      },
     }
   )
 );

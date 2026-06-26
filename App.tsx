@@ -18,6 +18,7 @@ import { Colors } from './src/theme';
 import { createSessionFromUrl } from './src/supabase/authCallback';
 import { supabase } from './src/supabase/client';
 import { syncOnboardingProfileToSupabase } from './src/repositories/profileSync';
+import { useAppStore } from './src/store/useAppStore';
 
 SplashScreenExpo.preventAutoHideAsync();
 
@@ -60,6 +61,15 @@ export default function App() {
     });
 
     return () => authSub.subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    useAppStore.persist.onFinishHydration(() => {
+      useAppStore.getState().expireTrialIfNeeded();
+    });
+    if (useAppStore.persist.hasHydrated()) {
+      useAppStore.getState().expireTrialIfNeeded();
+    }
   }, []);
 
   if (!fontsLoaded) {

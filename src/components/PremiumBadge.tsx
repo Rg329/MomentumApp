@@ -1,7 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Animated, Easing } from 'react-native';
-import { PREMIUM_COLOR } from '../monetization';
-import { useAppStore } from '../store/useAppStore';
+import { PREMIUM_COLOR, usePremium } from '../monetization';
 
 interface Props {
   size?: 'sm' | 'md';
@@ -9,7 +8,7 @@ interface Props {
 }
 
 export function PremiumBadge({ size = 'sm', shimmer = true }: Props) {
-  const { isPremium } = useAppStore();
+  const { isPremium } = usePremium();
   const shimmerAnim = useRef(new Animated.Value(0)).current;
 
   if (isPremium) return null;

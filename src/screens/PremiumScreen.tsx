@@ -8,7 +8,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/RootNavigator';
 import { Colors, Radius, Spacing } from '../theme';
-import { PREMIUM_FEATURES, PRICING, PREMIUM_COLOR } from '../monetization';
+import { PREMIUM_FEATURES, PRICING, PREMIUM_COLOR, usePremium } from '../monetization';
 import { useAppStore } from '../store/useAppStore';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Premium'>;
@@ -61,7 +61,8 @@ const heroStyles = StyleSheet.create({
 // ─── Main screen ──────────────────────────────────────────────────────────────
 export function PremiumScreen({ navigation }: Props) {
   const insets   = useSafeAreaInsets();
-  const { isPremium, setPremium } = useAppStore();
+  const pm = usePremium();
+  const setPremium = useAppStore((s) => s.setPremium);
   const [selectedPlan, setSelectedPlan] = useState<'monthly' | 'annual' | 'lifetime'>('annual');
 
   // Entrance animations
@@ -201,7 +202,7 @@ export function PremiumScreen({ navigation }: Props) {
 
         {/* ── CTA ── */}
         <View style={styles.ctaBlock}>
-          {isPremium ? (
+          {pm.isPremium ? (
             <View style={styles.activeCard}>
               <MaterialCommunityIcons name="check-circle" size={22} color={PREMIUM_COLOR} />
               <Text style={styles.activeText}>Momentum Premium is active</Text>
