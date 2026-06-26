@@ -44,6 +44,16 @@ export function formatSupabaseAuthError(error: unknown): string {
   }
 
   if (
+    lower.includes('pkce') ||
+    lower.includes('code verifier')
+  ) {
+    return (
+      'Open the sign-in link so it launches Expo Go on this phone — not Chrome or Safari. ' +
+      'Then tap Resend link and try again with a fresh email.'
+    );
+  }
+
+  if (
     lower.includes('failed to fetch') ||
     lower.includes('network request failed') ||
     lower.includes('network error') ||

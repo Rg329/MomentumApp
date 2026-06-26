@@ -6,6 +6,8 @@ export type ProfileUpsert = {
   procrastination_type?: string | null;
   peak_time?: string | null;
   coach_style?: string | null;
+  wake_time?: number | null;
+  sleep_time?: number | null;
 };
 
 export async function upsertMyProfile(patch: ProfileUpsert) {
@@ -24,4 +26,3 @@ export async function upsertMyProfile(patch: ProfileUpsert) {
 
   return supabase.from('profiles').upsert(payload, { onConflict: 'id' });
 }
-

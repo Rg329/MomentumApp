@@ -18,11 +18,12 @@ export const supabase = createClient(
   supabaseUrl ?? 'https://invalid.supabase.co',
   supabaseAnonKey ?? 'invalid-key',
   {
-    auth: {
-      storage: AsyncStorage,
-      autoRefreshToken: true,
-      persistSession: true,
-      detectSessionInUrl: false,
-    },
+  auth: {
+    storage: AsyncStorage,
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: false,
+    flowType: 'implicit',
+  },
   },
 );

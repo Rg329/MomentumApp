@@ -1,3 +1,5 @@
+import type { BehaviorProfile } from './behaviorProfile';
+
 // ─── Core profile enums ────────────────────────────────────────────────────────
 // Values match the option keys in src/data/mockData.ts exactly.
 
@@ -19,35 +21,32 @@ export type CoachStyle = 'supportive' | 'balanced' | 'strict';
 
 /** Canonical user profile derived from onboarding selections. */
 export interface UserProfile {
-  /** Primary variable: the specific pattern that causes this user to procrastinate. */
   procrastinationType: ProcrastinationType | null;
   peakTime:            PeakTime            | null;
   coachStyle:          CoachStyle          | null;
+  wakeTimeMinutes:     number;
+  sleepTimeMinutes:    number;
 }
 
 // ─── Schedule intelligence ─────────────────────────────────────────────────────
 /** Hints consumed by the (future) AI scheduling engine. */
 export interface ScheduleHints {
-  /** Place cognitively demanding tasks early in the day. */
   prioritizeEarlyHours: boolean;
-  /** Place cognitively demanding tasks late in the day. */
   prioritizeLateHours: boolean;
-  /** Break tasks longer than chunkThresholdMinutes into smaller blocks. */
   breakLargeTasks: boolean;
-  /** Maximum tasks shown at once (overwhelm management). */
   maxVisibleTasks: number;
-  /** Preferred energy curve for the day. */
   energyPattern: 'front-loaded' | 'balanced' | 'back-loaded';
-  /** Multiply all buffer times by this factor (low-energy users get 1.5×). */
   bufferMultiplier: number;
-  /** Tasks longer than this (minutes) get chunked when breakLargeTasks is true. */
   chunkThresholdMinutes: number;
-  /** Human-readable rationale shown on the schedule screen. */
   scheduleRationale: string;
+  wakeTimeMinutes: number;
+  sleepTimeMinutes: number;
+  productiveMinutesAvailable: number;
+  peakFocusStartMinutes: number;
+  peakFocusEndMinutes: number;
 }
 
 // ─── Coaching copy ─────────────────────────────────────────────────────────────
-/** In-context coaching messages surfaced throughout the app. */
 export interface CoachingMessages {
   addFirstTask:        string;
   capacityRealistic:   string;
@@ -58,24 +57,22 @@ export interface CoachingMessages {
   dailySummary:        string;
 }
 
+// Re-exported from behaviorProfile.ts for convenience.
+export type { BehaviorProfile, BehaviorProfileInput } from './behaviorProfile';
+
 // ─── Full personalization context ──────────────────────────────────────────────
-/** Everything a screen needs to render personalized content. */
 export interface PersonalizationContext {
   profile: UserProfile;
+  behaviorProfile: BehaviorProfile;
 
-  // Dashboard / BrainDump
   dashboardGreeting:  string;
   dashboardSubtext:   string;
   motivationalQuotes: string[];
   emptyStateMessage:  string;
 
-  // Per-context coaching
   coaching: CoachingMessages;
-
-  // Schedule intelligence (for AI engine)
   scheduleHints: ScheduleHints;
 
-  // UI metadata
   tone: {
     style:        CoachStyle | 'default';
     density:      'comfortable' | 'compact';

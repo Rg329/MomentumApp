@@ -4,11 +4,11 @@ import { derivePersonalization } from './engine';
 import type { PersonalizationContext } from './types';
 
 /**
- * Reads the persisted onboarding data from Zustand and returns a fully
- * derived PersonalizationContext.  Re-computes only when profile changes.
+ * Reads persisted onboarding data from Zustand and returns a fully
+ * derived PersonalizationContext including behavior profile.
  */
 export function usePersonalization(): PersonalizationContext {
-  const { onboardingData } = useAppStore();
+  const { onboardingData, wakeTime, sleepTime } = useAppStore();
 
   return useMemo(
     () =>
@@ -16,8 +16,15 @@ export function usePersonalization(): PersonalizationContext {
         onboardingData.procrastinationType,
         onboardingData.peakTime,
         onboardingData.coaching,
+        wakeTime,
+        sleepTime,
       ),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [onboardingData.procrastinationType, onboardingData.peakTime, onboardingData.coaching],
+    [
+      onboardingData.procrastinationType,
+      onboardingData.peakTime,
+      onboardingData.coaching,
+      wakeTime,
+      sleepTime,
+    ],
   );
 }

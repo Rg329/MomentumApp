@@ -7,7 +7,7 @@ import { RootStackParamList } from '../navigation/RootNavigator';
 import { Colors, Typography, Spacing, Radius, Shadow } from '../theme';
 import { TopBar } from '../components/TopBar';
 import { useAppStore } from '../store/useAppStore';
-import { upsertMyProfile } from '../repositories/profileRepo';
+import { syncOnboardingProfileToSupabase } from '../repositories/profileSync';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Credentials'>;
 
@@ -16,7 +16,7 @@ function isValidEmail(email: string) {
 }
 
 export function CredentialsScreen({ navigation }: Props) {
-  const { account, onboardingData, setAccount } = useAppStore();
+  const { account, setAccount } = useAppStore();
   const [name, setName] = useState(account.name ?? '');
   const [email, setEmail] = useState(account.email ?? '');
   const [error, setError] = useState<string | null>(null);
@@ -38,14 +38,7 @@ export function CredentialsScreen({ navigation }: Props) {
       email: email.trim().toLowerCase(),
       createdAt: account.createdAt ?? new Date().toISOString(),
     });
-    // Best-effort persist to Supabase profile
-    upsertMyProfile({
-      name: name.trim(),
-      email: email.trim().toLowerCase(),
-      procrastination_type: onboardingData.procrastinationType,
-      peak_time: onboardingData.peakTime,
-      coach_style: onboardingData.coaching,
-    }).catch(() => {});
+    syncOnboardingProfileToSupabase();
     navigation.replace('ProOffer');
   };
 

@@ -134,7 +134,7 @@ export const ONBOARDING_OPTIONS = {
     { key: 'dont_know_start',    label: "I don't know where to start",               icon: 'compass_off' },
     { key: 'easily_distracted',  label: 'I get distracted easily',                   icon: 'notifications_paused' },
     { key: 'changing_plans',     label: 'I keep changing my plans',                  icon: 'calendar_refresh' },
-    { key: 'underestimate_time', label: 'I underestimate how long tasks take',       icon: 'clock_alert' },
+    { key: 'underestimate_time', label: 'I fear I will fail',                       icon: 'clock_alert' },
   ],
   peakTime: [
     { key: 'morning',   label: 'Morning',   icon: 'wb_sunny' },
