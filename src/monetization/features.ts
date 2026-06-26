@@ -6,6 +6,14 @@ export const FREE_GENERATION_LIMIT = 3;
 export const PREMIUM_COLOR = '#6366f1'; // indigo-500
 
 export const FEATURES: Record<FeatureId, FeatureDef> = {
+  basic_coaching: {
+    id:          'basic_coaching',
+    name:        'Basic AI Coach',
+    description: 'Daily summaries and focus coaching grounded in your tasks and logged activity.',
+    promptHook:  'Your basic coach uses real task and completion data — not generic motivation.',
+    plan:        'free',
+    icon:        'account-voice',
+  },
   schedule_regeneration: {
     id:          'schedule_regeneration',
     name:        'Schedule Regeneration',
@@ -25,25 +33,25 @@ export const FEATURES: Record<FeatureId, FeatureDef> = {
   },
   adaptive_coaching: {
     id:          'adaptive_coaching',
-    name:        'Adaptive Coaching',
-    description: 'Your coach evolves week-over-week based on what actually works for you.',
-    promptHook:  'Adaptive Coaching learns your patterns and adjusts automatically.',
+    name:        'Behavioral Intelligence Coach',
+    description: 'Full procrastination analysis, pattern detection, and personalized recommendations from your usage history.',
+    promptHook:  'Unlock advanced pattern analysis and accountability coaching from your real behavior data.',
     plan:        'premium',
     icon:        'brain',
   },
   deep_insights: {
     id:          'deep_insights',
-    name:        'Deep Productivity Insights',
-    description: 'Understand your focus patterns, peak hours, and task-completion trends over time.',
-    promptHook:  'Deep Insights reveal exactly when and why you\'re most productive.',
+    name:        'Deep Procrastination Analysis',
+    description: 'Multi-pattern behavioral analysis with evidence from your task event history.',
+    promptHook:  'See which procrastination patterns your data confirms — not generic advice.',
     plan:        'premium',
     icon:        'chart-areaspline',
   },
   weekly_reflections: {
     id:          'weekly_reflections',
-    name:        'Weekly AI Reflections',
-    description: 'A personalised weekly review of your productivity patterns with actionable suggestions.',
-    promptHook:  'Weekly Reflections give you a coach-written summary every Sunday.',
+    name:        'Weekly Coaching Reports',
+    description: 'Observation → pattern → action weekly report from your 7-day completion trends.',
+    promptHook:  'Weekly reports analyze your real completion data and recommend one change.',
     plan:        'premium',
     icon:        'text-box-check-outline',
   },

@@ -15,11 +15,12 @@ import { RootStackParamList } from '../navigation/RootNavigator';
 import { Colors, Typography, Spacing, Radius, Shadow } from '../theme';
 import { TopBar } from '../components/TopBar';
 import { PremiumBadge } from '../components/PremiumBadge';
+import { CoachingCard, PremiumCoachingCard } from '../components/CoachingCard';
 import { usePremium, PREMIUM_COLOR } from '../monetization';
 import { useAppStore } from '../store/useAppStore';
+import { useBehavioralCoach, generateCoachingMessage } from '../coaching';
 
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
-const TARGET_SCORE = 84;
 
 // ─── Locked premium section ────────────────────────────────────────────────────
 function LockedSection({
@@ -121,25 +122,37 @@ export function DailySummaryScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const pm         = usePremium();
   const { completeDailyReview } = useAppStore();
+  const coach = useBehavioralCoach('daily_summary');
+
+  const deepAnalysis = coach.context && pm.canUse('deep_insights')
+    ? generateCoachingMessage('deep_analysis', coach.context, undefined, true)
+    : null;
+  const patternAnalysis = coach.context && pm.canUse('adaptive_coaching')
+    ? generateCoachingMessage('pattern_analysis', coach.context, undefined, true)
+    : null;
+
+  const targetScore = coach.analytics?.momentumScore ?? 0;
   const [score, setScore] = useState(0);
   const scoreBarAnim = useRef(new Animated.Value(0)).current;
   const fadeAnim     = useRef(new Animated.Value(0)).current;
   const toastOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    if (coach.loading) return;
+
     Animated.timing(fadeAnim, { toValue: 1, duration: 800, useNativeDriver: true }).start();
     Animated.timing(scoreBarAnim, {
-      toValue: TARGET_SCORE / 100, duration: 1500, useNativeDriver: false,
+      toValue: targetScore / 100, duration: 1500, useNativeDriver: false,
     }).start();
     let current = 0;
-    const step = Math.ceil(TARGET_SCORE / 60);
+    const step = Math.max(1, Math.ceil(targetScore / 60));
     const interval = setInterval(() => {
-      current = Math.min(current + step, TARGET_SCORE);
+      current = Math.min(current + step, targetScore);
       setScore(current);
-      if (current >= TARGET_SCORE) clearInterval(interval);
+      if (current >= targetScore) clearInterval(interval);
     }, 25);
     return () => clearInterval(interval);
-  }, []);
+  }, [coach.loading, targetScore]);
 
   const scoreBarWidth = scoreBarAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] });
 
@@ -165,11 +178,14 @@ export function DailySummaryScreen() {
             <MaterialCommunityIcons name="lightning-bolt" size={14} color={Colors.primary} />
             <Text style={styles.heroKicker}>Anti‑procrastination insights</Text>
           </View>
-          <Text style={styles.heroTitle}>Today, made easier to start.</Text>
+          <Text style={styles.heroTitle}>Your coach</Text>
           <Text style={styles.heroSubtitle}>
-            See what helped you move forward—and what to simplify tomorrow.
+            Straight talk based on what you actually do — not a personality quiz.
           </Text>
         </Animated.View>
+
+        {/* ── FREE: Behavioral coaching (O-P-A) ── */}
+        <CoachingCard coaching={coach.coaching} loading={coach.loading} />
 
         {/* ── FREE: Momentum Score ── */}
         <View style={styles.scoreCard}>
@@ -182,7 +198,11 @@ export function DailySummaryScreen() {
             </View>
             <View style={styles.scoreRight}>
               <Text style={styles.scoreNumber}>{score}</Text>
-              <Text style={styles.scoreDelta}>+12% from yesterday</Text>
+              {coach.analytics?.scoreDelta != null && (
+                <Text style={styles.scoreDelta}>
+                  {coach.analytics.scoreDelta > 0 ? '+' : ''}{coach.analytics.scoreDelta}% from yesterday
+                </Text>
+              )}
             </View>
           </View>
 
@@ -194,12 +214,12 @@ export function DailySummaryScreen() {
             <View style={styles.scoreMetric}>
               <MaterialCommunityIcons name="check-circle" size={18} color={Colors.primary} />
               <Text style={styles.scoreMetricLabel}>Tasks Completed</Text>
-              <Text style={styles.scoreMetricValue}>12</Text>
+              <Text style={styles.scoreMetricValue}>{coach.analytics?.tasksCompleted ?? 0}</Text>
             </View>
             <View style={styles.scoreMetric}>
               <MaterialCommunityIcons name="clock-fast" size={18} color={Colors.secondary} />
-              <Text style={styles.scoreMetricLabel}>Postponed</Text>
-              <Text style={styles.scoreMetricValue}>2</Text>
+              <Text style={styles.scoreMetricLabel}>Skipped</Text>
+              <Text style={styles.scoreMetricValue}>{coach.analytics?.tasksSkipped ?? 0}</Text>
             </View>
           </View>
           <View style={styles.scoreAura} />
@@ -208,11 +228,7 @@ export function DailySummaryScreen() {
         {/* ── FREE: Time Distribution ── */}
         <View style={styles.distCard}>
           <Text style={styles.distTitle}>TIME DISTRIBUTION</Text>
-          {[
-            { label: 'Deep Work',     value: '5.2h', pct: 65,  color: Colors.primary },
-            { label: 'Collaboration', value: '2.1h', pct: 30,  color: Colors.secondary },
-            { label: 'Breaks',        value: '1.4h', pct: 20,  color: Colors.secondaryFixedDim },
-          ].map((row) => (
+          {(coach.analytics?.timeDistribution ?? []).map((row) => (
             <View key={row.label}>
               <View style={styles.distRow}>
                 <Text style={styles.distLabel}>{row.label}</Text>
@@ -225,11 +241,13 @@ export function DailySummaryScreen() {
           ))}
         </View>
 
-        {/* ── FREE: Evening wind-down ── */}
+        {/* ── FREE: Tomorrow note (pattern — not a repeat of the action above) ── */}
         <View style={styles.winddownCard}>
-          <Text style={styles.winddownTitle}>Evening Wind-down</Text>
+          <Text style={styles.winddownTitle}>What I'm noticing</Text>
           <Text style={styles.winddownDesc}>
-            Your schedule is clear for the next 12 hours. Start tomorrow with your most important task.
+            {coach.coaching?.pattern
+              || coach.coaching?.observation
+              || "Complete a few focus sessions and I'll start spotting your patterns."}
           </Text>
         </View>
 
@@ -239,69 +257,65 @@ export function DailySummaryScreen() {
         )}
 
         {/* ── PREMIUM: Deep Analysis ── */}
-        {pm.isPremium ? (
+        {pm.canUse('deep_insights') ? (
           <View style={styles.premiumSection}>
             <View style={styles.premiumSectionHeader}>
-              <Text style={styles.sectionTitle}>Deep Analysis</Text>
+              <Text style={styles.sectionTitle}>Deep Procrastination Analysis</Text>
               <PremiumBadge size="sm" />
             </View>
-            <View style={styles.reflectionCard}>
-              <View style={styles.reflectionHeader}>
-                <MaterialCommunityIcons name="chart-areaspline" size={16} color={PREMIUM_COLOR} />
-                <Text style={[styles.reflectionBadge, { color: PREMIUM_COLOR }]}>AI REFLECTION</Text>
-              </View>
-              <Text style={styles.reflectionText}>
-                "Your peak focus was between 10 AM and 1 PM. By prioritizing your most complex task
-                early, you cleared the path for a smooth afternoon."
-              </Text>
-            </View>
+            <PremiumCoachingCard coaching={deepAnalysis} loading={coach.loading} />
           </View>
         ) : (
           <LockedSection
             icon="chart-areaspline"
-            title="Deep Productivity Analysis"
-            description="Understand your focus patterns, peak hours, and resistance trends over time."
+            title="Deep Procrastination Analysis"
+            description="Multi-pattern analysis with evidence from your task event history."
             onUnlock={() => navigation.navigate('Premium')}
           />
         )}
 
-        {/* ── PREMIUM: Weekly Reflections ── */}
-        {pm.isPremium ? (
+        {/* ── PREMIUM: Weekly Coaching Report ── */}
+        {pm.canUse('weekly_reflections') ? (
           <View style={styles.premiumSection}>
             <View style={styles.premiumSectionHeader}>
-              <Text style={styles.sectionTitle}>Weekly Reflections</Text>
+              <Text style={styles.sectionTitle}>Weekly Coaching Report</Text>
               <PremiumBadge size="sm" />
             </View>
             <View style={styles.weeklyCard}>
               <MaterialCommunityIcons name="text-box-check-outline" size={22} color={PREMIUM_COLOR} style={{ marginBottom: 6 }} />
-              <Text style={styles.weeklyTitle}>Week 22 · May 26–Jun 1</Text>
-              <Text style={styles.weeklyBody}>
-                This week you completed 74% of your planned tasks. Your strongest day was Wednesday.
-                Consider moving gym earlier — your energy consistently dips post-lunch.
-              </Text>
+              <Text style={styles.weeklyTitle}>{coach.weeklyReport?.weekLabel ?? 'Last 7 days'}</Text>
+              <PremiumCoachingCard
+                coaching={coach.context && pm.canUse('weekly_reflections')
+                  ? generateCoachingMessage('weekly_report', coach.context, undefined, true)
+                  : null}
+                loading={coach.loading}
+              />
             </View>
           </View>
         ) : (
           <LockedSection
             icon="text-box-check-outline"
-            title="Weekly AI Reflections"
-            description="A personalised coach-written summary of your week, every Sunday."
+            title="Weekly Coaching Reports"
+            description="Observation → pattern → action report from your 7-day trends."
             onUnlock={() => navigation.navigate('Premium')}
           />
         )}
 
-        {/* ── PREMIUM: Schedule Analytics ── */}
-        {pm.isPremium ? (
+        {/* ── PREMIUM: Pattern analysis + analytics ── */}
+        {pm.canUse('advanced_analytics') ? (
           <View style={styles.premiumSection}>
             <View style={styles.premiumSectionHeader}>
-              <Text style={styles.sectionTitle}>Schedule Analytics</Text>
+              <Text style={styles.sectionTitle}>Behavioral Trends</Text>
               <PremiumBadge size="sm" />
             </View>
+            {patternAnalysis && (
+              <PremiumCoachingCard coaching={patternAnalysis} loading={coach.loading} compact />
+            )}
             <View style={styles.analyticsRow}>
               {[
-                { icon: 'fire' as IconName,        label: 'Day Streak',    val: '7' },
-                { icon: 'trophy-outline' as IconName, label: 'Best Score', val: '91' },
-                { icon: 'percent' as IconName,     label: 'Completion',    val: '78%' },
+                { icon: 'fire' as IconName, label: 'Day Streak', val: String(coach.analytics?.currentStreak ?? 0) },
+                { icon: 'trophy-outline' as IconName, label: 'Best Streak', val: String(coach.analytics?.bestStreak ?? 0) },
+                { icon: 'percent' as IconName, label: 'Completion', val: `${coach.analytics?.completionRatePct ?? 0}%` },
               ].map((item) => (
                 <View key={item.label} style={styles.analyticsCard}>
                   <MaterialCommunityIcons name={item.icon} size={18} color={PREMIUM_COLOR} />
@@ -314,8 +328,8 @@ export function DailySummaryScreen() {
         ) : (
           <LockedSection
             icon="poll"
-            title="Advanced Schedule Analytics"
-            description="Track streaks, completion rates, and momentum scores over weeks."
+            title="Behavioral Trend Tracking"
+            description="Streaks, completion rates, and pattern analysis from historical data."
             onUnlock={() => navigation.navigate('Premium')}
           />
         )}

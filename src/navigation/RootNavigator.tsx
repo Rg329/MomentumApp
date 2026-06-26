@@ -23,9 +23,9 @@ export type RootStackParamList = {
   Constraints:  undefined;
   AIAnalysis:   undefined;
   OverloadAlert:undefined;
-  FocusMode:    { taskTitle?: string; taskDesc?: string; durationMinutes?: number } | undefined;
+  FocusMode:    { taskId?: string; taskTitle?: string; taskDesc?: string; durationMinutes?: number; scheduledTime?: string } | undefined;
   Premium:      undefined;
-  MainTabs:     undefined;
+  MainTabs:     { screen?: 'Focus' | 'Schedule' | 'Insights' | 'Settings' } | undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();

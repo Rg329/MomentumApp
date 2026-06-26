@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,8 @@ import {
   ScrollView,
   Animated,
   Easing,
+  Modal,
+  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -16,9 +18,14 @@ import { RootStackParamList } from '../navigation/RootNavigator';
 import { Colors, Typography, Spacing, Radius, Shadow } from '../theme';
 import { TopBar } from '../components/TopBar';
 import { PremiumBadge } from '../components/PremiumBadge';
-import { useAppStore } from '../store/useAppStore';
+import { SettingPickerModal, PickerOption } from '../components/SettingPickerModal';
+import { UpgradePrompt } from '../components/UpgradePrompt';
+import { useAppStore, Weekday, NotificationStyle } from '../store/useAppStore';
 import { usePremium, PREMIUM_COLOR } from '../monetization';
+import type { FeatureId } from '../monetization';
 import { usePersonalization } from '../personalization';
+import { syncOnboardingProfileToSupabase } from '../repositories/profileSync';
+import { minutesToDisplayTime, durationMinutesLabel } from '../utils/formatTime';
 
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
 
@@ -40,31 +47,50 @@ function prettyCoachStyle(v: string | null | undefined) {
   return v;
 }
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-interface SettingItem {
-  label:    string;
-  value?:   string;
-  icon:     IconName;
-  premium?: boolean;
-  onPress?: () => void;
+function prettyNotificationStyle(v: NotificationStyle) {
+  if (v === 'gentle') return 'Gentle';
+  if (v === 'minimal') return 'Minimal';
+  return 'Standard';
 }
+
+function prettyWeekday(v: Weekday) {
+  return titleCase(v);
+}
+
+type PickerKind =
+  | 'coachStyle'
+  | 'peakTime'
+  | 'notificationStyle'
+  | 'focusDuration'
+  | 'breakDuration'
+  | 'wakeTime'
+  | 'weeklyDay'
+  | null;
+
+interface SettingItem {
+  label: string;
+  value?: string;
+  icon: IconName;
+  premium?: boolean;
+  coachStylePremium?: boolean;
+  onPress?: () => void;
+  showChevron?: boolean;
+  toggle?: boolean;
+  toggleValue?: boolean;
+}
+
 interface SettingSection { title: string; items: SettingItem[] }
 
 // ─── Premium Plan Card ────────────────────────────────────────────────────────
 function PremiumCard({ isPremium, onUpgrade }: { isPremium: boolean; onUpgrade: () => void }) {
   const glowAnim = useRef(new Animated.Value(0)).current;
-  const shimmer  = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Animated.loop(Animated.sequence([
       Animated.timing(glowAnim, { toValue: 1, duration: 2200, useNativeDriver: true, easing: Easing.inOut(Easing.sin) }),
       Animated.timing(glowAnim, { toValue: 0, duration: 2200, useNativeDriver: true, easing: Easing.inOut(Easing.sin) }),
     ])).start();
-    Animated.loop(Animated.sequence([
-      Animated.timing(shimmer, { toValue: 1, duration: 1600, useNativeDriver: true, easing: Easing.inOut(Easing.sin) }),
-      Animated.timing(shimmer, { toValue: 0, duration: 1600, useNativeDriver: true, easing: Easing.inOut(Easing.sin) }),
-    ])).start();
-  }, []);
+  }, [glowAnim]);
 
   const glowOpacity = glowAnim.interpolate({ inputRange: [0, 1], outputRange: [0.15, 0.35] });
 
@@ -84,15 +110,6 @@ function PremiumCard({ isPremium, onUpgrade }: { isPremium: boolean; onUpgrade: 
             <Text style={cardStyles.activeSub}>All features unlocked · Unlimited generations</Text>
           </View>
         </View>
-        <View style={[cardStyles.divider, { backgroundColor: PREMIUM_COLOR + '25' }]} />
-        <View style={cardStyles.statsRow}>
-          {[['∞', 'Regenerations'], ['AI', 'Coaching'], ['7', 'Features']].map(([val, lbl]) => (
-            <View key={lbl} style={cardStyles.statItem}>
-              <Text style={[cardStyles.statVal, { color: PREMIUM_COLOR }]}>{val}</Text>
-              <Text style={cardStyles.statLbl}>{lbl}</Text>
-            </View>
-          ))}
-        </View>
       </View>
     );
   }
@@ -106,20 +123,9 @@ function PremiumCard({ isPremium, onUpgrade }: { isPremium: boolean; onUpgrade: 
         </View>
         <View style={{ flex: 1, gap: 3 }}>
           <Text style={cardStyles.upgradeTitle}>Upgrade to Premium</Text>
-          <Text style={cardStyles.upgradeSub}>Unlock unlimited regenerations, AI coaching & deep insights.</Text>
+          <Text style={cardStyles.upgradeSub}>Unlock coaching style, behavioral coach & deep insights.</Text>
         </View>
         <MaterialCommunityIcons name="chevron-right" size={20} color={PREMIUM_COLOR} />
-      </View>
-      <View style={cardStyles.upgradeFeatures}>
-        {['Unlimited generations', 'Adaptive coaching', 'Deep insights'].map((f) => (
-          <View key={f} style={cardStyles.upgradeFeatureRow}>
-            <MaterialCommunityIcons name="check-circle" size={12} color={PREMIUM_COLOR} />
-            <Text style={cardStyles.upgradeFeatureText}>{f}</Text>
-          </View>
-        ))}
-      </View>
-      <View style={cardStyles.trialPill}>
-        <Text style={cardStyles.trialText}>7-day free trial · from $4.99/mo</Text>
       </View>
     </TouchableOpacity>
   );
@@ -137,103 +143,363 @@ const cardStyles = StyleSheet.create({
   glow: { position: 'absolute', top: -30, right: -30, width: 120, height: 120, borderRadius: 60, backgroundColor: PREMIUM_COLOR },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   iconWrap: { width: 48, height: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  divider: { height: 1 },
-  statsRow: { flexDirection: 'row', justifyContent: 'space-around' },
-  statItem: { alignItems: 'center', gap: 2 },
-  statVal:  { fontFamily: 'Manrope_800ExtraBold', fontSize: 18, letterSpacing: -0.5 },
-  statLbl:  { fontFamily: 'Manrope_400Regular', fontSize: 11, color: Colors.onSurfaceVariant },
   activeBadge: { backgroundColor: PREMIUM_COLOR, borderRadius: 50, paddingHorizontal: 8, paddingVertical: 2, alignSelf: 'flex-start', marginBottom: 2 },
   activeBadgeText: { fontFamily: 'Manrope_700Bold', fontSize: 9, color: '#fff', letterSpacing: 0.8 },
   activeTitle: { fontFamily: 'Manrope_700Bold', fontSize: 15, color: Colors.onSurface },
   activeSub:   { fontFamily: 'Manrope_400Regular', fontSize: 12, color: Colors.onSurfaceVariant },
   upgradeTitle: { fontFamily: 'Manrope_700Bold', fontSize: 15, color: Colors.onSurface },
   upgradeSub:   { fontFamily: 'Manrope_400Regular', fontSize: 12, color: Colors.onSurfaceVariant, lineHeight: 17 },
-  upgradeFeatures: { gap: 5 },
-  upgradeFeatureRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  upgradeFeatureText: { fontFamily: 'Manrope_500Medium', fontSize: 12, color: PREMIUM_COLOR },
-  trialPill: { backgroundColor: PREMIUM_COLOR + '12', borderRadius: Radius.full, paddingHorizontal: 12, paddingVertical: 6, alignSelf: 'flex-start' },
-  trialText: { fontFamily: 'Manrope_600SemiBold', fontSize: 11, color: PREMIUM_COLOR },
 });
+
+function InfoModal({
+  visible,
+  title,
+  body,
+  onClose,
+}: {
+  visible: boolean;
+  title: string;
+  body: string;
+  onClose: () => void;
+}) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={infoStyles.overlay}>
+        <View style={infoStyles.card}>
+          <Text style={infoStyles.title}>{title}</Text>
+          <Text style={infoStyles.body}>{body}</Text>
+          <TouchableOpacity style={infoStyles.btn} onPress={onClose} activeOpacity={0.85}>
+            <Text style={infoStyles.btnLabel}>Got it</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const infoStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    padding: Spacing.gutter,
+  },
+  card: {
+    backgroundColor: Colors.surfaceContainerLowest,
+    borderRadius: Radius.xl,
+    padding: 22,
+    gap: 12,
+    ...Shadow.card,
+  },
+  title: { ...Typography.headlineSm, color: Colors.onSurface, fontFamily: 'Manrope_700Bold' },
+  body: { ...Typography.bodyMd, color: Colors.onSurfaceVariant, lineHeight: 22 },
+  btn: {
+    marginTop: 8,
+    backgroundColor: Colors.primary,
+    borderRadius: Radius.lg,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  btnLabel: { fontFamily: 'Manrope_700Bold', fontSize: 14, color: Colors.onPrimary },
+});
+
+const COACH_OPTIONS: PickerOption[] = [
+  { value: 'supportive', label: 'Supportive', description: 'Encouraging and calm' },
+  { value: 'balanced', label: 'Balanced', description: 'Direct but fair' },
+  { value: 'strict', label: 'Strict', description: 'Accountability-focused' },
+];
+
+const PEAK_OPTIONS: PickerOption[] = [
+  { value: 'morning', label: 'Morning', description: 'Best focus before noon' },
+  { value: 'afternoon', label: 'Afternoon', description: 'Peak energy mid-day' },
+  { value: 'evening', label: 'Evening', description: 'Strongest later in the day' },
+];
+
+const NOTIFICATION_OPTIONS: PickerOption<NotificationStyle>[] = [
+  { value: 'gentle', label: 'Gentle', description: 'Softer reminders' },
+  { value: 'standard', label: 'Standard', description: 'Balanced nudges' },
+  { value: 'minimal', label: 'Minimal', description: 'Only essential alerts' },
+];
+
+const FOCUS_DURATION_OPTIONS: PickerOption[] = [15, 25, 30, 45, 60, 90].map((m) => ({
+  value: String(m),
+  label: durationMinutesLabel(m),
+}));
+
+const BREAK_DURATION_OPTIONS: PickerOption[] = [5, 10, 15, 20, 30].map((m) => ({
+  value: String(m),
+  label: durationMinutesLabel(m),
+}));
+
+const WAKE_TIME_OPTIONS: PickerOption[] = Array.from({ length: 13 }, (_, i) => {
+  const minutes = 300 + i * 30;
+  return { value: String(minutes), label: minutesToDisplayTime(minutes) };
+});
+
+const WEEKDAY_OPTIONS: PickerOption<Weekday>[] = (
+  ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'] as Weekday[]
+).map((d) => ({ value: d, label: prettyWeekday(d) }));
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export function SettingsScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { isPremium } = useAppStore();
+  const {
+    isPremium,
+    account,
+    onboardingData,
+    wakeTime,
+    preferences,
+    setOnboardingData,
+    setWakeTime,
+    setPreferences,
+  } = useAppStore();
   const pm = usePremium();
   const p  = usePersonalization();
 
+  const [picker, setPicker] = useState<PickerKind>(null);
+  const [upgradeFeature, setUpgradeFeature] = useState<FeatureId>('adaptive_coaching');
+  const [showUpgrade, setShowUpgrade] = useState(false);
+  const [infoModal, setInfoModal] = useState<'privacy' | 'profile' | null>(null);
+
   const coachStyleLabel = prettyCoachStyle(p.profile.coachStyle);
   const peakTimeLabel   = prettyPeakTime(p.profile.peakTime);
+
+  const requirePremium = useCallback((featureId: FeatureId, onAllowed: () => void) => {
+    if (pm.canUse(featureId)) {
+      onAllowed();
+      return;
+    }
+    setUpgradeFeature(featureId);
+    setShowUpgrade(true);
+  }, [pm]);
+
+  const syncProfile = () => {
+    syncOnboardingProfileToSupabase().catch(() => {});
+  };
+
+  const goToInsights = () => {
+    navigation.navigate('MainTabs', { screen: 'Insights' });
+  };
 
   const SECTIONS: SettingSection[] = [
     {
       title: 'Preferences',
       items: [
-        { label: 'Coaching Style',    value: coachStyleLabel, icon: 'scale-balance' },
-        { label: 'Peak Productivity', value: peakTimeLabel,   icon: 'weather-sunset-up' },
-        { label: 'Notification Style',value: coachStyleLabel, icon: 'bell-ring-outline' },
-        { label: 'Adaptive Coaching', value: 'AI-driven',                         icon: 'brain', premium: true },
+        {
+          label: 'Coaching Style',
+          value: coachStyleLabel,
+          icon: 'scale-balance',
+          coachStylePremium: true,
+          onPress: () => requirePremium('adaptive_coaching', () => setPicker('coachStyle')),
+        },
+        {
+          label: 'Peak Productivity',
+          value: peakTimeLabel,
+          icon: 'weather-sunset-up',
+          onPress: () => setPicker('peakTime'),
+        },
+        {
+          label: 'Notification Style',
+          value: prettyNotificationStyle(preferences.notificationStyle),
+          icon: 'bell-ring-outline',
+          onPress: () => setPicker('notificationStyle'),
+        },
+        {
+          label: 'Adaptive Coaching',
+          value: pm.canUse('adaptive_coaching') ? 'On' : undefined,
+          icon: 'brain',
+          premium: true,
+          onPress: () => requirePremium('adaptive_coaching', goToInsights),
+        },
       ],
     },
     {
       title: 'Schedule',
       items: [
-        { label: 'Default Focus Duration', value: '25 min', icon: 'timer-outline' },
-        { label: 'Break Duration',         value: '5 min',  icon: 'coffee-outline' },
-        { label: 'Daily Start Time',       value: '8:00 AM',icon: 'weather-sunset-up' },
-        { label: 'Advanced Optimization',  value: 'Smart',  icon: 'lightning-bolt', premium: true },
+        {
+          label: 'Default Focus Duration',
+          value: durationMinutesLabel(preferences.defaultFocusDurationMinutes),
+          icon: 'timer-outline',
+          onPress: () => setPicker('focusDuration'),
+        },
+        {
+          label: 'Break Duration',
+          value: durationMinutesLabel(preferences.breakDurationMinutes),
+          icon: 'coffee-outline',
+          onPress: () => setPicker('breakDuration'),
+        },
+        {
+          label: 'Daily Start Time',
+          value: minutesToDisplayTime(wakeTime),
+          icon: 'weather-sunset-up',
+          onPress: () => setPicker('wakeTime'),
+        },
+        {
+          label: 'Advanced Optimization',
+          value: preferences.advancedOptimizationEnabled ? 'On' : 'Off',
+          icon: 'lightning-bolt',
+          premium: true,
+          toggle: true,
+          toggleValue: preferences.advancedOptimizationEnabled,
+          onPress: () => requirePremium('advanced_optimization', () => {
+            setPreferences({ advancedOptimizationEnabled: !preferences.advancedOptimizationEnabled });
+          }),
+        },
       ],
     },
     {
       title: 'Insights',
       items: [
-        { label: 'Weekly Reflections', value: 'Sunday', icon: 'text-box-check-outline', premium: true },
-        { label: 'Schedule Analytics', value: 'Advanced', icon: 'poll', premium: true },
-        { label: 'Data & Privacy',     value: '',        icon: 'shield-lock-outline' },
+        {
+          label: 'Weekly Reflections',
+          value: pm.canUse('weekly_reflections') ? prettyWeekday(preferences.weeklyReflectionDay) : undefined,
+          icon: 'text-box-check-outline',
+          premium: true,
+          onPress: () => requirePremium('weekly_reflections', () => setPicker('weeklyDay')),
+        },
+        {
+          label: 'Schedule Analytics',
+          value: pm.canUse('advanced_analytics') ? 'View' : undefined,
+          icon: 'poll',
+          premium: true,
+          onPress: () => requirePremium('advanced_analytics', goToInsights),
+        },
+        {
+          label: 'Data & Privacy',
+          value: 'Local + cloud',
+          icon: 'shield-lock-outline',
+          onPress: () => setInfoModal('privacy'),
+        },
       ],
     },
     {
       title: 'Account',
       items: [
-        { label: 'Profile',       value: 'You',  icon: 'account-circle-outline' },
-        { label: 'Subscription',  value: isPremium ? 'Premium' : 'Free', icon: 'star-circle-outline',
-          onPress: () => navigation.navigate('Premium') },
-        { label: 'App Version',   value: '1.0.0', icon: 'information-outline' },
+        {
+          label: 'Profile',
+          value: account.name ?? 'Set up',
+          icon: 'account-circle-outline',
+          onPress: () => setInfoModal('profile'),
+        },
+        {
+          label: 'Subscription',
+          value: isPremium ? 'Premium' : 'Free',
+          icon: 'star-circle-outline',
+          onPress: () => navigation.navigate('Premium'),
+        },
+        {
+          label: 'App Version',
+          value: '1.0.0',
+          icon: 'information-outline',
+          showChevron: false,
+        },
       ],
     },
   ];
 
-  const handlePremiumRow = () => { if (!isPremium) navigation.navigate('Premium'); };
+  const pickerConfig = (() => {
+    switch (picker) {
+      case 'coachStyle':
+        return {
+          title: 'Coaching Style',
+          subtitle: 'Premium — changes how your coach speaks to you.',
+          options: COACH_OPTIONS,
+          selected: onboardingData.coaching ?? 'balanced',
+          onSelect: (v: string) => {
+            setOnboardingData({ coaching: v });
+            syncProfile();
+          },
+        };
+      case 'peakTime':
+        return {
+          title: 'Peak Productivity',
+          subtitle: 'When you usually have the most energy.',
+          options: PEAK_OPTIONS,
+          selected: onboardingData.peakTime ?? 'morning',
+          onSelect: (v: string) => {
+            setOnboardingData({ peakTime: v });
+            syncProfile();
+          },
+        };
+      case 'notificationStyle':
+        return {
+          title: 'Notification Style',
+          subtitle: 'How reminders feel in the app.',
+          options: NOTIFICATION_OPTIONS,
+          selected: preferences.notificationStyle,
+          onSelect: (v: NotificationStyle) => setPreferences({ notificationStyle: v }),
+        };
+      case 'focusDuration':
+        return {
+          title: 'Default Focus Duration',
+          subtitle: 'Used when adding new tasks and starting focus.',
+          options: FOCUS_DURATION_OPTIONS,
+          selected: String(preferences.defaultFocusDurationMinutes),
+          onSelect: (v: string) => setPreferences({ defaultFocusDurationMinutes: Number(v) }),
+        };
+      case 'breakDuration':
+        return {
+          title: 'Break Duration',
+          subtitle: 'Length of breaks in your generated schedule.',
+          options: BREAK_DURATION_OPTIONS,
+          selected: String(preferences.breakDurationMinutes),
+          onSelect: (v: string) => setPreferences({ breakDurationMinutes: Number(v) }),
+        };
+      case 'wakeTime':
+        return {
+          title: 'Daily Start Time',
+          subtitle: 'When your day begins — used for scheduling.',
+          options: WAKE_TIME_OPTIONS,
+          selected: String(wakeTime),
+          onSelect: (v: string) => {
+            setWakeTime(Number(v));
+            syncProfile();
+          },
+        };
+      case 'weeklyDay':
+        return {
+          title: 'Weekly Reflection Day',
+          subtitle: 'When your weekly coaching report is ready.',
+          options: WEEKDAY_OPTIONS,
+          selected: preferences.weeklyReflectionDay,
+          onSelect: (v: Weekday) => setPreferences({ weeklyReflectionDay: v }),
+        };
+      default:
+        return null;
+    }
+  })();
+
+  const profileBody = [
+    account.name ? `Name: ${account.name}` : 'Name: Not set',
+    account.email ? `Email: ${account.email}` : 'Email: Not set',
+    `Peak time: ${peakTimeLabel}`,
+    account.createdAt
+      ? `Member since: ${new Date(account.createdAt).toLocaleDateString()}`
+      : null,
+  ].filter(Boolean).join('\n\n');
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <TopBar />
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        {/* Header */}
         <View style={styles.heroBlock}>
-          <View style={styles.heroOrb1} />
-          <View style={styles.heroOrb2} />
-          <View style={styles.heroKickerRow}>
-            <MaterialCommunityIcons name="tune-variant" size={14} color={Colors.primary} />
-            <Text style={styles.heroKicker}>Personalize Momentum</Text>
-          </View>
           <Text style={styles.heroTitle}>Settings</Text>
           <Text style={styles.heroSubtitle}>
-            Your coaching style and focus patterns shape how Momentum helps you start.
+            Tune how Momentum plans your day and coaches you.
           </Text>
         </View>
 
-        {/* Premium card */}
         <PremiumCard isPremium={isPremium} onUpgrade={() => navigation.navigate('Premium')} />
 
-        {/* Setting sections */}
         {SECTIONS.map((section) => (
           <View key={section.title} style={styles.section}>
             <Text style={styles.sectionTitle}>{section.title}</Text>
             <View style={styles.sectionCard}>
               {section.items.map((item, idx) => {
-                const isLocked = item.premium && !isPremium;
+                const isCoachLocked = item.coachStylePremium && !pm.canUse('adaptive_coaching');
+                const isLocked = (item.premium && !isPremium) || isCoachLocked;
+
                 return (
                   <TouchableOpacity
                     key={item.label}
@@ -242,8 +508,13 @@ export function SettingsScreen() {
                       idx < section.items.length - 1 && styles.settingRowBorder,
                       isLocked && styles.settingRowLocked,
                     ]}
-                    activeOpacity={0.7}
-                    onPress={item.onPress ?? (isLocked ? handlePremiumRow : undefined)}
+                    activeOpacity={item.onPress ? 0.7 : 1}
+                    onPress={
+                      item.toggle && pm.canUse('advanced_optimization')
+                        ? undefined
+                        : item.onPress
+                    }
+                    disabled={!item.onPress || (item.toggle && pm.canUse('advanced_optimization'))}
                   >
                     <View style={styles.settingLeft}>
                       <View style={[styles.settingIconWrap, isLocked && { backgroundColor: PREMIUM_COLOR + '12' }]}>
@@ -258,19 +529,28 @@ export function SettingsScreen() {
                           {item.label}
                         </Text>
                         {isLocked && (
-                          <Text style={styles.lockedNote}>Requires Premium</Text>
+                          <Text style={styles.lockedNote}>
+                            {item.coachStylePremium ? 'Premium to change' : 'Requires Premium'}
+                          </Text>
                         )}
                       </View>
                     </View>
                     <View style={styles.settingRight}>
-                      {isLocked ? (
+                      {item.toggle && pm.canUse('advanced_optimization') ? (
+                        <Switch
+                          value={item.toggleValue}
+                          onValueChange={(v) => setPreferences({ advancedOptimizationEnabled: v })}
+                          trackColor={{ false: Colors.surfaceVariant, true: PREMIUM_COLOR + '80' }}
+                          thumbColor={item.toggleValue ? PREMIUM_COLOR : Colors.outline}
+                        />
+                      ) : isLocked ? (
                         <PremiumBadge size="sm" />
                       ) : item.value ? (
                         <Text style={[styles.settingValue, item.label === 'Subscription' && isPremium && { color: PREMIUM_COLOR }]}>
                           {item.value}
                         </Text>
                       ) : null}
-                      {!isLocked && (
+                      {item.onPress && item.showChevron !== false && !item.toggle && (
                         <MaterialCommunityIcons name="chevron-right" size={20} color={Colors.outlineVariant} />
                       )}
                       {isLocked && (
@@ -284,7 +564,6 @@ export function SettingsScreen() {
           </View>
         ))}
 
-        {/* Generation counter for free users */}
         {!isPremium && (
           <View style={styles.genCounter}>
             <MaterialCommunityIcons name="refresh" size={14} color={Colors.outline} />
@@ -298,6 +577,38 @@ export function SettingsScreen() {
 
         <Text style={styles.versionText}>Momentum v1.0.0 · Calculated Calm</Text>
       </ScrollView>
+
+      {pickerConfig && (
+        <SettingPickerModal
+          visible={picker != null}
+          title={pickerConfig.title}
+          subtitle={pickerConfig.subtitle}
+          options={pickerConfig.options}
+          selected={pickerConfig.selected}
+          onSelect={pickerConfig.onSelect as (v: string) => void}
+          onClose={() => setPicker(null)}
+        />
+      )}
+
+      <UpgradePrompt
+        visible={showUpgrade}
+        featureId={upgradeFeature}
+        onDismiss={() => setShowUpgrade(false)}
+      />
+
+      <InfoModal
+        visible={infoModal === 'privacy'}
+        title="Data & Privacy"
+        body={'Your tasks and schedule are stored on this device. If you sign in, onboarding preferences and behavioral events sync to Supabase under your account.\n\nWe do not sell your data. You can clear local data by uninstalling the app.'}
+        onClose={() => setInfoModal(null)}
+      />
+
+      <InfoModal
+        visible={infoModal === 'profile'}
+        title="Your Profile"
+        body={profileBody}
+        onClose={() => setInfoModal(null)}
+      />
     </SafeAreaView>
   );
 }
@@ -310,42 +621,8 @@ const styles = StyleSheet.create({
     paddingBottom: 100,
     gap: 20,
   },
-  heroBlock: {
-    marginBottom: 4,
-    borderRadius: Radius.xl,
-    padding: 18,
-    backgroundColor: Colors.surfaceContainerLow,
-    borderWidth: 1,
-    borderColor: Colors.outlineVariant + '28',
-    overflow: 'hidden',
-  },
-  heroOrb1: {
-    position: 'absolute',
-    top: -70,
-    right: -80,
-    width: 240,
-    height: 240,
-    borderRadius: 120,
-    backgroundColor: Colors.primary + '10',
-  },
-  heroOrb2: {
-    position: 'absolute',
-    bottom: -80,
-    left: -90,
-    width: 260,
-    height: 260,
-    borderRadius: 130,
-    backgroundColor: Colors.primaryFixed + '40',
-  },
-  heroKickerRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
-  heroKicker: {
-    ...Typography.labelSm,
-    color: Colors.primary,
-    textTransform: 'uppercase',
-    letterSpacing: 1.6,
-    fontSize: 10,
-  },
-  heroTitle:    { ...Typography.displayLg, color: Colors.onSurface, fontSize: 28, lineHeight: 36, marginBottom: 6 },
+  heroBlock: { marginBottom: 4, gap: 6 },
+  heroTitle:    { ...Typography.displayLg, color: Colors.onSurface, fontSize: 28, lineHeight: 36 },
   heroSubtitle: { ...Typography.bodyLg, color: Colors.onSurfaceVariant },
   section:      { gap: 10 },
   sectionTitle: {
@@ -373,7 +650,7 @@ const styles = StyleSheet.create({
     borderBottomColor: Colors.outlineVariant + '30',
   },
   settingRowLocked: { backgroundColor: PREMIUM_COLOR + '05' },
-  settingLeft:  { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  settingLeft:  { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
   settingIconWrap: {
     width: 36, height: 36, borderRadius: 10,
     backgroundColor: Colors.surfaceContainerLow,

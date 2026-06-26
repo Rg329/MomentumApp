@@ -3,9 +3,10 @@ export type Plan = 'free' | 'premium';
 
 // ─── Feature registry keys ─────────────────────────────────────────────────────
 export type FeatureId =
+  | 'basic_coaching'           // free: behavioral coach (limited surfaces)
   | 'schedule_regeneration'    // free: 3/day   premium: unlimited
   | 'advanced_optimization'    // premium only
-  | 'adaptive_coaching'        // premium only
+  | 'adaptive_coaching'        // premium only — full behavioral intelligence coach
   | 'deep_insights'            // premium only
   | 'weekly_reflections'       // premium only
   | 'unlimited_rescheduling'   // premium only

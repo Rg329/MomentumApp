@@ -9,6 +9,8 @@ import { RootStackParamList } from '../navigation/RootNavigator';
 import { Colors, Typography, Spacing, Radius } from '../theme';
 import { TopBar } from '../components/TopBar';
 import { AI_STEPS } from '../data/mockData';
+import { buildAndSaveUserSchedule } from '../scheduling/scheduleService';
+import { useAppStore } from '../store/useAppStore';
 
 type Props    = NativeStackScreenProps<RootStackParamList, 'AIAnalysis'>;
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
@@ -150,6 +152,12 @@ export function AIAnalysisScreen({ navigation }: Props) {
   const runSteps = (index: number) => {
     if (index >= AI_STEPS.length) {
       setIsDone(true);
+      const { tasks } = useAppStore.getState();
+      if (tasks.length > 0) {
+        buildAndSaveUserSchedule();
+      } else {
+        useAppStore.setState({ scheduleBlocks: [] });
+      }
       setTimeout(() => navigation.replace('OverloadAlert'), 1000);
       return;
     }

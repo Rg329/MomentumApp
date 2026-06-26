@@ -1,45 +1,208 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   Animated,
+  Modal,
+  Pressable,
+  ScrollView,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
+import Slider from '@react-native-community/slider';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/RootNavigator';
-import { Colors, Typography, Spacing, Radius } from '../theme';
+import { Colors, Typography, Spacing, Radius, Shadow } from '../theme';
 import { TopBar } from '../components/TopBar';
 import { usePersonalization } from '../personalization';
+import { trackTaskCompleted, trackTaskStarted } from '../intelligence/eventTracker';
+import { buildCoachingContext, generateFocusCoachingLine } from '../coaching';
+import { usePremium } from '../monetization';
+import { useAppStore } from '../store/useAppStore';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'FocusMode'>;
 
+function timeStrToMinutes(t: string): number {
+  const [h, m] = t.split(':').map(Number);
+  return h * 60 + m;
+}
+
+function minutesToTimeStr(total: number): string {
+  const h = Math.floor(total / 60) % 24;
+  const m = total % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+function formatDisplayTime(time: string): string {
+  const [h, m] = time.split(':').map(Number);
+  const ap = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 || 12;
+  return `${h12}:${String(m).padStart(2, '0')} ${ap}`;
+}
+
+function formatMinutesDisplay(total: number): string {
+  return formatDisplayTime(minutesToTimeStr(total));
+}
+
+function parseTimeInput(raw: string): string | null {
+  const trimmed = raw.trim();
+  const match = trimmed.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return null;
+
+  const h = Number(match[1]);
+  const m = Number(match[2]);
+  if (h < 0 || h > 23 || m < 0 || m > 59) return null;
+
+  return minutesToTimeStr(h * 60 + m);
+}
+
+const RESCHEDULE_MIN = 360;   // 6:00 AM
+const RESCHEDULE_MAX = 1380;  // 11:00 PM
+const RESCHEDULE_STEP = 15;
+
 export function FocusModeScreen({ navigation, route }: Props) {
+  const defaultFocus = useAppStore((s) => s.preferences.defaultFocusDurationMinutes);
   const {
+    taskId,
     taskTitle = 'Focus Session',
     taskDesc = 'Stay in the zone. Deep work block for maximum concentration.',
-    durationMinutes = 25,
+    durationMinutes = defaultFocus,
+    scheduledTime,
   } = route.params ?? {};
 
+  const { rescheduleScheduleBlock } = useAppStore();
+
   const p     = usePersonalization();
+  const pm    = usePremium();
   const TOTAL = durationMinutes * 60;
+
+  const focusTaskId = taskId ?? `focus-${taskTitle}`;
 
   const [timeLeft, setTimeLeft] = useState(TOTAL);
   const [isPaused, setIsPaused] = useState(false);
   const [isCompleted, setIsCompleted] = useState(false);
+  const [showReschedule, setShowReschedule] = useState(false);
+  const [customMinutes, setCustomMinutes] = useState(
+    scheduledTime ? timeStrToMinutes(scheduledTime) : 540,
+  );
+  const [customTimeInput, setCustomTimeInput] = useState(
+    scheduledTime ?? '09:00',
+  );
 
-  // Personalized coaching message — changes at midway point
+  useEffect(() => {
+    if (!showReschedule) return;
+    const base = scheduledTime ? timeStrToMinutes(scheduledTime) : 540;
+    setCustomMinutes(base);
+    setCustomTimeInput(scheduledTime ?? minutesToTimeStr(base));
+  }, [showReschedule, scheduledTime]);
+
+  const customTimeValue = minutesToTimeStr(
+    Math.min(Math.max(customMinutes, RESCHEDULE_MIN), RESCHEDULE_MAX),
+  );
+
+  const rescheduleOptions = useMemo(() => {
+    const base = scheduledTime ? timeStrToMinutes(scheduledTime) : timeStrToMinutes('09:00');
+    const offsets = [30, 60, 90, 120, 180, 240];
+    const options = offsets.map((offset) => {
+      const value = minutesToTimeStr(base + offset);
+      return { label: formatDisplayTime(value), value };
+    });
+    if (scheduledTime) {
+      return [{ label: `Keep at ${formatDisplayTime(scheduledTime)}`, value: scheduledTime }, ...options];
+    }
+    return options;
+  }, [scheduledTime]);
+
+  const handlePickReschedule = (newTime: string) => {
+    if (taskId && scheduledTime && newTime !== scheduledTime) {
+      rescheduleScheduleBlock(taskId, newTime);
+    } else if (taskId && !scheduledTime && newTime) {
+      rescheduleScheduleBlock(taskId, newTime);
+    }
+    setShowReschedule(false);
+    navigation.goBack();
+  };
+
+  const handleConfirmCustomTime = () => {
+    const parsed = parseTimeInput(customTimeInput);
+    const newTime = parsed ?? customTimeValue;
+    handlePickReschedule(newTime);
+  };
+
+  const handleSliderChange = (value: number) => {
+    const snapped = Math.round(value / RESCHEDULE_STEP) * RESCHEDULE_STEP;
+    setCustomMinutes(snapped);
+    setCustomTimeInput(minutesToTimeStr(snapped));
+  };
+
+  const handleTimeInputChange = (text: string) => {
+    setCustomTimeInput(text);
+    const parsed = parseTimeInput(text);
+    if (parsed) {
+      const mins = timeStrToMinutes(parsed);
+      if (mins >= RESCHEDULE_MIN && mins <= RESCHEDULE_MAX) {
+        setCustomMinutes(mins);
+      }
+    }
+  };
+
+  // Behavioral coaching — updates at midway and completion
   const progressPct = Math.round((1 - timeLeft / TOTAL) * 100);
-  const coachMsg = isCompleted
+  const fallbackMsg = isCompleted
     ? p.coaching.focusComplete
     : progressPct >= 50
     ? p.coaching.focusMidway
     : p.coaching.focusStart;
+  const [coachMsg, setCoachMsg] = useState(fallbackMsg);
+
+  useEffect(() => {
+    let cancelled = false;
+    const surface = isCompleted
+      ? 'focus_complete'
+      : progressPct >= 50
+      ? 'focus_midway'
+      : 'focus_start';
+
+    buildCoachingContext()
+      .then((ctx) => {
+        if (cancelled) return;
+        setCoachMsg(
+          generateFocusCoachingLine(
+            surface,
+            ctx,
+            { currentTaskTitle: taskTitle, durationMinutes, progressPct: progressPct / 100 },
+            pm.isPremium,
+          ),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setCoachMsg(fallbackMsg);
+      });
+
+    return () => { cancelled = true; };
+  }, [isCompleted, progressPct, taskTitle, durationMinutes, pm.isPremium]);
 
   const auraAnim     = useRef(new Animated.Value(0)).current;
   const completeScale = useRef(new Animated.Value(1)).current;
+  const trackedStart = useRef(false);
+  const trackedComplete = useRef(false);
+
+  useEffect(() => {
+    if (trackedStart.current) return;
+    trackedStart.current = true;
+    trackTaskStarted(focusTaskId, taskTitle, durationMinutes);
+  }, [durationMinutes, focusTaskId, taskTitle]);
+
+  useEffect(() => {
+    if (!isCompleted || trackedComplete.current) return;
+    trackedComplete.current = true;
+    trackTaskCompleted(focusTaskId, taskTitle, durationMinutes);
+  }, [durationMinutes, focusTaskId, isCompleted, taskTitle]);
 
   useEffect(() => {
     Animated.loop(
@@ -141,8 +304,12 @@ export function FocusModeScreen({ navigation, route }: Props) {
         </View>
 
         {/* Reschedule */}
-        <TouchableOpacity style={styles.rescheduleBtn} onPress={() => navigation.goBack()}>
-          <MaterialCommunityIcons name="calendar-refresh" size={14} color={Colors.onSurfaceVariant} />
+        <TouchableOpacity
+          style={styles.rescheduleBtn}
+          onPress={() => setShowReschedule(true)}
+          activeOpacity={0.85}
+        >
+          <MaterialCommunityIcons name="calendar-refresh" size={14} color={Colors.primary} />
           <Text style={styles.rescheduleLabel}>Reschedule</Text>
         </TouchableOpacity>
 
@@ -160,6 +327,105 @@ export function FocusModeScreen({ navigation, route }: Props) {
           ))}
         </View>
       </View>
+
+      <Modal
+        visible={showReschedule}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowReschedule(false)}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalBackdrop}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowReschedule(false)} />
+          <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.modalHeader}>
+              <MaterialCommunityIcons name="calendar-refresh" size={20} color={Colors.primary} />
+              <Text style={styles.modalTitle}>Reschedule task</Text>
+            </View>
+            <Text style={styles.modalSub}>
+              {scheduledTime
+                ? `Currently at ${formatDisplayTime(scheduledTime)}. Choose any time below.`
+                : 'Choose any time for this task.'}
+            </Text>
+
+            <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <View style={styles.customTimeCard}>
+                <Text style={styles.customTimeLabel}>Your time</Text>
+                <Text style={styles.customTimeDisplay}>{formatMinutesDisplay(customMinutes)}</Text>
+
+                <Slider
+                  style={styles.customSlider}
+                  minimumValue={RESCHEDULE_MIN}
+                  maximumValue={RESCHEDULE_MAX}
+                  step={RESCHEDULE_STEP}
+                  value={customMinutes}
+                  onValueChange={handleSliderChange}
+                  minimumTrackTintColor={Colors.primary}
+                  maximumTrackTintColor={Colors.primaryFixed}
+                  thumbTintColor={Colors.primary}
+                />
+                <View style={styles.sliderRange}>
+                  <Text style={styles.sliderRangeLabel}>6:00 AM</Text>
+                  <Text style={styles.sliderRangeLabel}>11:00 PM</Text>
+                </View>
+
+                <Text style={styles.inputLabel}>Or type a time (24h)</Text>
+                <TextInput
+                  value={customTimeInput}
+                  onChangeText={handleTimeInputChange}
+                  placeholder="09:30"
+                  placeholderTextColor={Colors.outline}
+                  keyboardType="numbers-and-punctuation"
+                  style={styles.timeInput}
+                  maxLength={5}
+                />
+
+                <TouchableOpacity
+                  style={styles.confirmCustomBtn}
+                  onPress={handleConfirmCustomTime}
+                  activeOpacity={0.88}
+                >
+                  <Text style={styles.confirmCustomLabel}>
+                    Confirm {formatMinutesDisplay(customMinutes)}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.quickLabel}>Quick options</Text>
+              {rescheduleOptions.map((opt) => {
+                const isCurrent = opt.value === scheduledTime;
+                return (
+                  <TouchableOpacity
+                    key={opt.value}
+                    style={[styles.modalOption, isCurrent && styles.modalOptionCurrent]}
+                    onPress={() => handlePickReschedule(opt.value)}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={[styles.modalOptionLabel, isCurrent && styles.modalOptionLabelCurrent]}>
+                      {opt.label}
+                    </Text>
+                    {isCurrent ? (
+                      <Text style={styles.modalOptionHint}>Current</Text>
+                    ) : (
+                      <MaterialCommunityIcons name="chevron-right" size={18} color={Colors.outline} />
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+
+            <TouchableOpacity
+              style={styles.modalCancel}
+              onPress={() => setShowReschedule(false)}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.modalCancelLabel}>Cancel</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -269,8 +535,162 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    backgroundColor: Colors.primaryFixed + '80',
+    borderWidth: 1,
+    borderColor: Colors.primary + '25',
   },
-  rescheduleLabel: { ...Typography.labelSm, color: Colors.onSurfaceVariant, fontSize: 13 },
+  rescheduleLabel: { ...Typography.labelSm, color: Colors.primary, fontSize: 13, fontFamily: 'Manrope_600SemiBold' },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'flex-end',
+  },
+  modalScroll: {
+    maxHeight: 420,
+  },
+  customTimeCard: {
+    backgroundColor: Colors.surfaceContainerLow,
+    borderRadius: Radius.lg,
+    padding: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: Colors.primary + '20',
+    gap: 8,
+  },
+  customTimeLabel: {
+    fontFamily: 'Manrope_600SemiBold',
+    fontSize: 11,
+    color: Colors.secondary,
+    textTransform: 'uppercase',
+    letterSpacing: 1.1,
+  },
+  customTimeDisplay: {
+    fontFamily: 'Manrope_800ExtraBold',
+    fontSize: 28,
+    color: Colors.primary,
+    textAlign: 'center',
+    marginVertical: 4,
+  },
+  customSlider: {
+    width: '100%',
+    height: 40,
+  },
+  sliderRange: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: -6,
+  },
+  sliderRangeLabel: {
+    fontFamily: 'Manrope_400Regular',
+    fontSize: 10,
+    color: Colors.outline,
+  },
+  inputLabel: {
+    fontFamily: 'Manrope_500Medium',
+    fontSize: 12,
+    color: Colors.onSurfaceVariant,
+    marginTop: 6,
+  },
+  timeInput: {
+    backgroundColor: Colors.surfaceContainerLowest,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: Colors.outlineVariant + '50',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontFamily: 'Manrope_600SemiBold',
+    fontSize: 16,
+    color: Colors.onSurface,
+    textAlign: 'center',
+  },
+  confirmCustomBtn: {
+    marginTop: 8,
+    backgroundColor: Colors.primary,
+    borderRadius: Radius.lg,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  confirmCustomLabel: {
+    fontFamily: 'Manrope_700Bold',
+    fontSize: 14,
+    color: Colors.onPrimary,
+  },
+  quickLabel: {
+    fontFamily: 'Manrope_600SemiBold',
+    fontSize: 12,
+    color: Colors.onSurfaceVariant,
+    marginBottom: 8,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  modalCard: {
+    backgroundColor: Colors.surfaceContainerLowest,
+    borderTopLeftRadius: Radius.xl,
+    borderTopRightRadius: Radius.xl,
+    paddingHorizontal: Spacing.gutter,
+    paddingTop: 20,
+    paddingBottom: 28,
+    maxHeight: '70%',
+    ...Shadow.card,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 6,
+  },
+  modalTitle: {
+    ...Typography.headlineSm,
+    color: Colors.onSurface,
+    fontFamily: 'Manrope_700Bold',
+  },
+  modalSub: {
+    ...Typography.bodyMd,
+    color: Colors.onSurfaceVariant,
+    marginBottom: 12,
+    lineHeight: 20,
+  },
+  modalOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    borderRadius: Radius.lg,
+    backgroundColor: Colors.surfaceContainerLow,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: Colors.outlineVariant + '30',
+  },
+  modalOptionCurrent: {
+    borderColor: Colors.primary + '40',
+    backgroundColor: Colors.primaryFixed + '60',
+  },
+  modalOptionLabel: {
+    fontFamily: 'Manrope_600SemiBold',
+    fontSize: 15,
+    color: Colors.onSurface,
+  },
+  modalOptionLabelCurrent: {
+    color: Colors.primary,
+  },
+  modalOptionHint: {
+    fontFamily: 'Manrope_500Medium',
+    fontSize: 11,
+    color: Colors.primary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  modalCancel: {
+    alignItems: 'center',
+    paddingVertical: 14,
+    marginTop: 4,
+  },
+  modalCancelLabel: {
+    fontFamily: 'Manrope_500Medium',
+    fontSize: 14,
+    color: Colors.outline,
+  },
   sprintDots: {
     flexDirection: 'row',
     gap: 8,

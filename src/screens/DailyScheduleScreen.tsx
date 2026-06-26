@@ -11,7 +11,9 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, Radius, Shadow } from '../theme';
 import { TopBar } from '../components/TopBar';
 import { usePersonalization } from '../personalization';
-import { MOCK_SCHEDULE, ScheduleBlock } from '../data/mockData';
+import { ScheduleBlock } from '../data/mockData';
+import { useAppStore } from '../store/useAppStore';
+import { useBehavioralCoach } from '../coaching';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/RootNavigator';
@@ -126,14 +128,19 @@ function TimeBlockItem({ block, onPress }: { block: ScheduleBlock; onPress: () =
 export function DailyScheduleScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const p   = usePersonalization();
+  const { scheduleBlocks, tasks } = useAppStore();
+  const scheduleCoach = useBehavioralCoach('schedule_banner');
   const now = nowMinutes();
 
+  const blocks = scheduleBlocks;
+  const hasUserTasks = tasks.length > 0;
+
   const nowIndex = useMemo(() => {
-    for (let i = 0; i < MOCK_SCHEDULE.length; i++) {
-      if (timeStrToMinutes(MOCK_SCHEDULE[i].time) > now) return i;
+    for (let i = 0; i < blocks.length; i++) {
+      if (timeStrToMinutes(blocks[i].time) > now) return i;
     }
-    return MOCK_SCHEDULE.length;
-  }, [now]);
+    return blocks.length;
+  }, [blocks, now]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -188,16 +195,30 @@ export function DailyScheduleScreen() {
             {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
           </Text>
           <Text style={styles.headerSub}>
-            Break big tasks into focused blocks so it’s easy to start—and easier to finish.
+            {scheduleCoach.coaching?.action
+              ?? (hasUserTasks
+                ? 'Your schedule is built from your tasks — tap a block to start focus mode.'
+                : 'Add tasks on the Plan tab, then generate your schedule.')}
           </Text>
         </View>
 
         {/* ── Timeline ───────────────────────────────────────────────────── */}
+        {blocks.length === 0 ? (
+          <View style={styles.emptySchedule}>
+            <MaterialCommunityIcons name="calendar-blank-outline" size={36} color={Colors.outline} />
+            <Text style={styles.emptyTitle}>No schedule yet</Text>
+            <Text style={styles.emptySub}>
+              {hasUserTasks
+                ? 'Tap Regenerate to build your timetable from your tasks.'
+                : 'Add tasks on the Plan tab, then generate your schedule.'}
+            </Text>
+          </View>
+        ) : (
         <View style={styles.timeline}>
           {/* Subtle dotted vertical guide */}
           <View style={styles.timelineGuide} />
 
-          {MOCK_SCHEDULE.map((block, idx) => (
+          {blocks.map((block, idx) => (
             <React.Fragment key={block.id}>
               {idx === nowIndex && <NowIndicator />}
               <View style={styles.timelineRow}>
@@ -209,9 +230,11 @@ export function DailyScheduleScreen() {
                     block={block}
                     onPress={() =>
                       navigation.navigate('FocusMode', {
+                        taskId: block.id,
                         taskTitle: block.title,
                         taskDesc: block.description,
                         durationMinutes: block.duration ? parseInt(block.duration, 10) : 25,
+                        scheduledTime: block.time,
                       })
                     }
                   />
@@ -220,8 +243,9 @@ export function DailyScheduleScreen() {
             </React.Fragment>
           ))}
 
-          {nowIndex === MOCK_SCHEDULE.length && <NowIndicator />}
+          {nowIndex === blocks.length && <NowIndicator />}
         </View>
+        )}
       </ScrollView>
 
       {/* ── FAB ────────────────────────────────────────────────────────────── */}
@@ -323,6 +347,24 @@ const styles = StyleSheet.create({
     ...Typography.bodyMd,
     color: Colors.onSurfaceVariant,
     maxWidth: 340,
+  },
+  emptySchedule: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 48,
+    paddingHorizontal: 24,
+    gap: 10,
+  },
+  emptyTitle: {
+    ...Typography.headlineSm,
+    color: Colors.onSurface,
+    fontFamily: 'Manrope_700Bold',
+  },
+  emptySub: {
+    ...Typography.bodyMd,
+    color: Colors.onSurfaceVariant,
+    textAlign: 'center',
+    lineHeight: 22,
   },
   headerActions: {
     flexDirection: 'row',

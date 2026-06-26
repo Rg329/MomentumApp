@@ -197,8 +197,9 @@ function AddTaskModal({ visible, onClose, onAdd }: {
   onAdd: (text: string, durationMinutes: number) => void;
 }) {
   const insets = useSafeAreaInsets();
+  const defaultDuration = useAppStore((s) => s.preferences.defaultFocusDurationMinutes);
   const [taskName, setTaskName]         = useState('');
-  const [selectedDuration, setSelectedDuration] = useState(30);
+  const [selectedDuration, setSelectedDuration] = useState(defaultDuration);
   const [isCustom, setIsCustom]         = useState(false);
   const [customHrs, setCustomHrs]       = useState('0');
   const [customMin, setCustomMin]       = useState('30');
@@ -232,14 +233,17 @@ function AddTaskModal({ visible, onClose, onAdd }: {
 
   useEffect(() => {
     if (visible) {
-      setTaskName(''); setSelectedDuration(30); setIsCustom(false);
-      setCustomHrs('0'); setCustomMin('30');
+      setTaskName('');
+      setSelectedDuration(defaultDuration);
+      setIsCustom(false);
+      setCustomHrs('0');
+      setCustomMin(String(defaultDuration % 60 || defaultDuration));
       Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, tension: 60, friction: 13 }).start(() => runEntrance());
     } else {
       Keyboard.dismiss();
       Animated.timing(slideAnim, { toValue: 700, duration: 240, useNativeDriver: true }).start();
     }
-  }, [visible]);
+  }, [visible, defaultDuration]);
 
   useEffect(() => {
     Animated.spring(customAnim, {
