@@ -30,7 +30,9 @@ export async function trackTaskEvent(input: TrackTaskEventInput) {
 export async function fetchRecentTaskEvents(limit = 100, daysBack = 30) {
   if (!isSupabaseConfigured) return { data: [] as TaskEventRow[], error: null };
 
-  const userId = await requireUserId();
+  const { data: userData } = await supabase.auth.getUser();
+  if (!userData.user) return { data: [] as TaskEventRow[], error: null };
+  const userId = userData.user.id;
   const since = new Date();
   since.setDate(since.getDate() - daysBack);
 

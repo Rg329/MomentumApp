@@ -6,14 +6,71 @@ import type { Task } from '../store/useAppStore';
 import type { ScheduleHints } from '../personalization/types';
 import { useAppStore } from '../store/useAppStore';
 
+export type GenerateScheduleResult = {
+  blocks: ScheduleBlock[];
+  droppedTasks: Array<{ title: string; durationMinutes: number }>;
+};
+
 export type GenerateScheduleInput = {
   tasks: Task[];
   wakeTimeMinutes: number;
   sleepTimeMinutes: number;
   scheduleHints: ScheduleHints;
+  blockedSlots?: Array<{ startMinutes: number; endMinutes: number; title: string }>;
 };
 
 const LUNCH_MINUTES = 30;
+
+type BlockedSlot = { startMinutes: number; endMinutes: number; title?: string };
+
+/** Parse "10:00 AM", "2:30 PM", or "14:30" → minutes from midnight. */
+export function parseTimeToMinutes(timeStr: string): number | null {
+  const trimmed = timeStr.trim();
+  if (!trimmed || trimmed === '—' || trimmed === '-') return null;
+
+  const match12 = trimmed.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (match12) {
+    let h = Number(match12[1]) % 12;
+    const m = Number(match12[2]);
+    if (match12[3].toUpperCase() === 'PM') h += 12;
+    return h * 60 + m;
+  }
+
+  const match24 = trimmed.match(/^(\d{1,2}):(\d{2})$/);
+  if (match24) {
+    return Number(match24[1]) * 60 + Number(match24[2]);
+  }
+
+  return null;
+}
+
+function isBlocked(
+  cursor: number,
+  durationMinutes: number,
+  blockedSlots: BlockedSlot[],
+): boolean {
+  const end = cursor + durationMinutes;
+  return blockedSlots.some(
+    (slot) => cursor < slot.endMinutes && end > slot.startMinutes,
+  );
+}
+
+function advancePastBlock(
+  cursor: number,
+  durationMinutes: number,
+  blockedSlots: BlockedSlot[],
+): number {
+  let c = cursor;
+  let safety = 0;
+  while (isBlocked(c, durationMinutes, blockedSlots) && safety < 48) {
+    const conflict = blockedSlots.find(
+      (s) => c < s.endMinutes && c + durationMinutes > s.startMinutes,
+    );
+    if (conflict) c = conflict.endMinutes;
+    safety += 1;
+  }
+  return c;
+}
 
 function breakMinutes(): number {
   return useAppStore.getState().preferences.breakDurationMinutes;
@@ -83,16 +140,26 @@ function orderingScore(unit: WorkUnit, index: number, hints: ScheduleHints): num
  * Generate schedule blocks from the authenticated user's current local tasks.
  * Each deep-work block uses the task id so focus mode and event tracking stay aligned.
  */
-export function generateScheduleFromTasks(input: GenerateScheduleInput): ScheduleBlock[] {
-  const { tasks, wakeTimeMinutes, sleepTimeMinutes, scheduleHints } = input;
-  if (!tasks.length) return [];
+export function generateScheduleFromTasks(input: GenerateScheduleInput): GenerateScheduleResult {
+  const { tasks, wakeTimeMinutes, sleepTimeMinutes, scheduleHints, blockedSlots = [] } = input;
+  if (!tasks.length) return { blocks: [], droppedTasks: [] };
 
   const units = expandTasks(tasks, scheduleHints).sort(
-    (a, b) => orderingScore(b, tasks.findIndex((t) => t.id === b.taskId), scheduleHints)
-            - orderingScore(a, tasks.findIndex((t) => t.id === a.taskId), scheduleHints),
+    (a, b) =>
+      orderingScore(
+        b,
+        tasks.findIndex((t) => b.taskId === t.id || b.taskId.startsWith(t.id + '-p')),
+        scheduleHints,
+      ) -
+      orderingScore(
+        a,
+        tasks.findIndex((t) => a.taskId === t.id || a.taskId.startsWith(t.id + '-p')),
+        scheduleHints,
+      ),
   );
 
   const blocks: ScheduleBlock[] = [];
+  const droppedTasks: GenerateScheduleResult['droppedTasks'] = [];
   let cursor = scheduleHints.peakFocusStartMinutes ?? wakeTimeMinutes + 45;
   const dayEnd = Math.min(
     sleepTimeMinutes - 45,
@@ -102,7 +169,8 @@ export function generateScheduleFromTasks(input: GenerateScheduleInput): Schedul
   const lunchTarget = wakeTimeMinutes + Math.floor((sleepTimeMinutes - wakeTimeMinutes) / 2);
 
   units.forEach((unit, index) => {
-    if (!lunchInserted && cursor >= lunchTarget - 30) {
+    if (!lunchInserted && cursor >= lunchTarget - 30 && cursor >= wakeTimeMinutes + 180) {
+      cursor = advancePastBlock(cursor, LUNCH_MINUTES, blockedSlots);
       blocks.push({
         id: `break-lunch-${index}`,
         time: minutesToTime(cursor),
@@ -116,7 +184,12 @@ export function generateScheduleFromTasks(input: GenerateScheduleInput): Schedul
       lunchInserted = true;
     }
 
-    if (cursor + unit.durationMinutes > dayEnd) return;
+    cursor = advancePastBlock(cursor, unit.durationMinutes, blockedSlots);
+
+    if (cursor + unit.durationMinutes > dayEnd) {
+      droppedTasks.push({ title: unit.title, durationMinutes: unit.durationMinutes });
+      return;
+    }
 
     blocks.push({
       id: unit.taskId,
@@ -131,7 +204,7 @@ export function generateScheduleFromTasks(input: GenerateScheduleInput): Schedul
     });
     cursor += unit.durationMinutes;
 
-    if (index === 0 && scheduleHints.scheduleRationale) {
+    if (index === 0 && scheduleHints.scheduleRationale?.trim()) {
       blocks.push({
         id: `insight-${unit.taskId}`,
         time: minutesToTime(cursor),
@@ -157,11 +230,14 @@ export function generateScheduleFromTasks(input: GenerateScheduleInput): Schedul
     }
   });
 
-  return blocks.sort((a, b) => {
-    const toMins = (t: string) => {
-      const [h, m] = t.split(':').map(Number);
-      return h * 60 + m;
-    };
-    return toMins(a.time) - toMins(b.time);
-  });
+  return {
+    blocks: blocks.sort((a, b) => {
+      const toMins = (t: string) => {
+        const [h, m] = t.split(':').map(Number);
+        return h * 60 + m;
+      };
+      return toMins(a.time) - toMins(b.time);
+    }),
+    droppedTasks,
+  };
 }

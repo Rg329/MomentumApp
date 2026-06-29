@@ -78,7 +78,6 @@ export function PremiumScreen({ navigation }: Props) {
   }, []);
 
   const handleSubscribe = () => {
-    // Mock — in production connect to RevenueCat
     setPremium(true);
     navigation.goBack();
   };

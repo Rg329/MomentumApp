@@ -1,6 +1,10 @@
 import type { CoachingContext, CoachingMessage, CoachingOptions, CoachingSurface } from './types';
 import {
   INSUFFICIENT_DATA_MESSAGE,
+  DAY1_OBSERVATION,
+  DAY1_ACTION,
+  DAY1_FALLBACK_OBSERVATION,
+  DAY1_FALLBACK_ACTION,
   PATTERN_PLAIN,
   ACTION_BY_SIGNAL,
   DEEP_ACTION_BY_SIGNAL,
@@ -42,15 +46,24 @@ function msg(
 }
 
 function insufficient(surface: CoachingSurface, ctx: CoachingContext): CoachingMessage {
-  const actions: Partial<Record<CoachingSurface, string>> = {
-    daily_summary: 'Pick one small task and finish a 25-minute focus session today.',
-    deep_analysis: 'Complete a few more focus sessions — then I can spot what\'s holding you back.',
-    weekly_report: 'Finish at least one task per day this week so I can read your rhythm.',
-    pattern_analysis: 'Log a few more completions and I\'ll show you what\'s working.',
-    focus_start: 'Start the timer — finishing this block is how I learn what works for you.',
-    schedule_banner: 'Generate your schedule, then complete one block so I can coach you better.',
-  };
+  if (
+    surface === 'daily_summary' ||
+    surface === 'schedule_banner' ||
+    surface === 'focus_start'
+  ) {
+    const pt          = ctx.onboardingProfile.procrastinationType ?? '';
+    const observation = DAY1_OBSERVATION[pt] ?? DAY1_FALLBACK_OBSERVATION;
+    const action      = DAY1_ACTION[pt]      ?? DAY1_FALLBACK_ACTION;
+    return msg(observation, '', action, ctx);
+  }
 
+  const actions: Partial<Record<CoachingSurface, string>> = {
+    deep_analysis:    'Complete a few more focus sessions — then I can spot what\'s holding you back.',
+    weekly_report:    'Finish at least one task per day this week so I can read your rhythm.',
+    pattern_analysis: 'Log a few more completions and I\'ll show you what\'s working.',
+    focus_midway:     'Keep going — you\'re halfway there.',
+    focus_complete:   'Session logged. Come back tomorrow and I\'ll have more to tell you.',
+  };
   return msg(
     INSUFFICIENT_DATA_MESSAGE,
     '',
@@ -59,13 +72,10 @@ function insufficient(surface: CoachingSurface, ctx: CoachingContext): CoachingM
   );
 }
 
-function injectTask(action: string, task: string | null): string {
-  if (!task) return action;
-  if (action.includes('hardest task')) {
-    return action.replace('your hardest task', `"${task}"`).replace('Hardest task', `"${task}"`);
+  function injectTask(action: string, task: string | null): string {
+    if (!task) return action;
+    return action.replace(/your hardest task|Hardest task/gi, `"${task}"`);
   }
-  return action;
-}
 
 function buildDaily(ctx: CoachingContext): CoachingMessage {
   if (!hasEnoughBehavioralData(ctx)) return insufficient('daily_summary', ctx);

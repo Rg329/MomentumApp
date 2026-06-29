@@ -33,6 +33,20 @@ export interface Task {
   durationMinutes: number;
 }
 
+export interface Constraint {
+  id: string;
+  title: string;
+  start: string;
+  end: string;
+  color: 'primary' | 'secondary';
+}
+
+export interface DeadlineTask {
+  id: string;
+  title: string;
+  deadline: string;
+}
+
 export type NotificationStyle = 'gentle' | 'standard' | 'minimal';
 export type Weekday =
   | 'sunday'
@@ -66,16 +80,27 @@ interface AppState {
   account:             AccountProfile;
   tasks:               Task[];
   scheduleBlocks:      ScheduleBlock[];
+  scheduleDate:        string | null;
+  completedTaskIds:    string[]; // block IDs marked complete today
   wakeTime:            number;
   sleepTime:           number;
   preferences:         AppPreferences;
+  constraints:         Constraint[];
+  deadlines:           DeadlineTask[];
+
+  // ── Streak ──────────────────────────────────────────────────────────────────
+  currentStreak:       number;
+  longestStreak:       number;
+  lastStreakDate:       string | null; // ISO date of last day tasks were completed
 
   // ── Monetization ────────────────────────────────────────────────────────────
   isPremium:           boolean;
-  trial:              TrialState;
-  dailyGenerations:    number;   // how many regenerations used today
-  lastGenerationDate:  string | null; // ISO date string YYYY-MM-DD
-  lastDailyReviewDate: string | null; // ISO date string YYYY-MM-DD
+  hasSeenProOffer:     boolean;
+  trial:               TrialState;
+  dailyGenerations:    number;
+  lastGenerationDate:  string | null;
+  lastDailyReviewDate: string | null;
+  lastAuthPromptDate:  string | null;
 
   // ── Actions ─────────────────────────────────────────────────────────────────
   setHasOnboarded:     (v: boolean) => void;
@@ -83,18 +108,28 @@ interface AppState {
   setOnboardingData:   (data: Partial<OnboardingData>) => void;
   setAccount:          (data: Partial<AccountProfile>) => void;
   addTask:             (text: string, durationMinutes: number) => void;
+  updateTask:          (id: string, text: string, durationMinutes: number) => void;
   removeTask:          (id: string) => void;
   clearTasks:          () => void;
-  generateScheduleFromUserTasks: () => ScheduleBlock[];
+  generateScheduleFromUserTasks: () => Promise<ScheduleBlock[]>;
   rescheduleScheduleBlock: (id: string, newTime: string) => void;
+  markTaskComplete:    (blockId: string) => void;
+  clearDayData:        () => void;
   setWakeTime:         (v: number) => void;
   setSleepTime:        (v: number) => void;
   setPreferences:      (data: Partial<AppPreferences>) => void;
+  setConstraints:      (constraints: Constraint[]) => void;
+  setDeadlines:        (deadlines: DeadlineTask[]) => void;
   setPremium:          (v: boolean) => void;
+  setHasSeenProOffer:  (v: boolean) => void;
+  setScheduleDate:     (date: string | null) => void;
   startFreeTrial14d:   () => void;
   expireTrialIfNeeded: () => boolean;
   incrementGeneration: () => void;
   completeDailyReview: () => void;
+  setLastAuthPromptDate: (date: string) => void;
+  recordDayComplete:   () => void; // call when user completes ≥1 task on a given day
+  resetStore:          () => void;
 }
 
 const storage = Platform.OS === 'web'
@@ -110,14 +145,23 @@ export const useAppStore = create<AppState>()(
       account:            { name: null, email: null, createdAt: null },
       tasks:              [],
       scheduleBlocks:     [],
+      scheduleDate:       null,
+      completedTaskIds:   [],
       wakeTime:           390,
       sleepTime:          1365,
       preferences:        { ...DEFAULT_PREFERENCES },
+      constraints:        [],
+      deadlines:          [],
+      currentStreak:      0,
+      longestStreak:      0,
+      lastStreakDate:      null,
       isPremium:          false,
+      hasSeenProOffer:    false,
       trial:              { isTrialActive: false, startedAt: null, endsAt: null },
       dailyGenerations:   0,
       lastGenerationDate: null,
       lastDailyReviewDate:null,
+      lastAuthPromptDate: null,
 
       setHasOnboarded:    (v) => set({ hasOnboarded: v }),
       dismissWelcomeCard: ()  => set({ hasSeenWelcomeCard: true }),
@@ -129,10 +173,17 @@ export const useAppStore = create<AppState>()(
         set((s) => ({ tasks: [...s.tasks, task] }));
         trackTaskCreated(task);
       },
+      updateTask: (id, text, durationMinutes) => {
+        set((s) => ({
+          tasks: s.tasks.map((t) =>
+            t.id === id ? { ...t, text: text.trim(), durationMinutes } : t,
+          ),
+        }));
+      },
       removeTask: (id) =>
         set((s) => ({ tasks: s.tasks.filter((t) => t.id !== id) })),
-      clearTasks:  () => set({ tasks: [], scheduleBlocks: [] }),
-      generateScheduleFromUserTasks: () => buildAndSaveUserSchedule(),
+      clearTasks: () => set({ tasks: [], scheduleBlocks: [], completedTaskIds: [] }),
+      generateScheduleFromUserTasks: async () => (await buildAndSaveUserSchedule()).blocks,
       rescheduleScheduleBlock: (id, newTime) => {
         const block = useAppStore.getState().scheduleBlocks.find((b) => b.id === id);
         if (!block || block.time === newTime) return;
@@ -152,18 +203,31 @@ export const useAppStore = create<AppState>()(
 
         trackTaskRescheduled(id, block.title, previousTime, newTime);
       },
+      markTaskComplete: (blockId) => {
+        set((s) => ({
+          completedTaskIds: s.completedTaskIds.includes(blockId)
+            ? s.completedTaskIds
+            : [...s.completedTaskIds, blockId],
+        }));
+        useAppStore.getState().recordDayComplete();
+      },
+      clearDayData: () =>
+        set({ scheduleBlocks: [], completedTaskIds: [], scheduleDate: null }),
       setWakeTime: (v) => set({ wakeTime: v }),
       setSleepTime:(v) => set({ sleepTime: v }),
       setPreferences: (data) =>
         set((s) => ({ preferences: { ...s.preferences, ...data } })),
+      setConstraints: (constraints) => set({ constraints }),
+      setDeadlines:   (deadlines)   => set({ deadlines }),
       setPremium: (v) =>
         set((s) => ({
           isPremium: v,
-          // Paid subscription supersedes trial — don't let an old trial flag expire a real sub.
           trial: v && s.trial.isTrialActive
             ? { ...s.trial, isTrialActive: false }
             : s.trial,
         })),
+      setHasSeenProOffer: (v) => set({ hasSeenProOffer: v }),
+      setScheduleDate: (date) => set({ scheduleDate: date }),
       startFreeTrial14d: () => {
         const startedAt = new Date();
         const endsAt = new Date(startedAt);
@@ -199,25 +263,69 @@ export const useAppStore = create<AppState>()(
         const today = new Date().toISOString().split('T')[0];
         set({ lastDailyReviewDate: today });
       },
+      setLastAuthPromptDate: (date) => set({ lastAuthPromptDate: date }),
+      recordDayComplete: () => {
+        const today = new Date().toISOString().split('T')[0];
+        const s = useAppStore.getState();
+        if (s.lastStreakDate === today) return; // already recorded today
+        const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+        const newStreak = s.lastStreakDate === yesterday ? s.currentStreak + 1 : 1;
+        const longest = Math.max(newStreak, s.longestStreak);
+        set({ currentStreak: newStreak, longestStreak: longest, lastStreakDate: today });
+      },
+      resetStore: () => set({
+        hasOnboarded:        false,
+        hasSeenWelcomeCard:  false,
+        onboardingData:      { procrastinationType: null, peakTime: null, coaching: null },
+        account:             { name: null, email: null, createdAt: null },
+        tasks:               [],
+        scheduleBlocks:      [],
+        scheduleDate:        null,
+        completedTaskIds:    [],
+        wakeTime:            390,
+        sleepTime:           1365,
+        preferences:         { ...DEFAULT_PREFERENCES },
+        constraints:         [],
+        deadlines:           [],
+        currentStreak:       0,
+        longestStreak:       0,
+        lastStreakDate:       null,
+        isPremium:           false,
+        hasSeenProOffer:     false,
+        trial:               { isTrialActive: false, startedAt: null, endsAt: null },
+        dailyGenerations:    0,
+        lastGenerationDate:  null,
+        lastDailyReviewDate: null,
+        lastAuthPromptDate:  null,
+      }),
     }),
     {
       name: 'momentum-app-store',
       storage,
       partialize: (state) => ({
-        hasOnboarded:       state.hasOnboarded,
-        hasSeenWelcomeCard: state.hasSeenWelcomeCard,
-        onboardingData:     state.onboardingData,
-        account:            state.account,
-        tasks:              state.tasks,
-        scheduleBlocks:     state.scheduleBlocks,
-        wakeTime:           state.wakeTime,
-        sleepTime:          state.sleepTime,
-        preferences:        state.preferences,
-        isPremium:          state.isPremium,
-        trial:              state.trial,
-        dailyGenerations:   state.dailyGenerations,
-        lastGenerationDate: state.lastGenerationDate,
+        hasOnboarded:        state.hasOnboarded,
+        hasSeenWelcomeCard:  state.hasSeenWelcomeCard,
+        onboardingData:      state.onboardingData,
+        account:             state.account,
+        tasks:               state.tasks,
+        scheduleBlocks:      state.scheduleBlocks,
+        scheduleDate:        state.scheduleDate,
+        completedTaskIds:    state.completedTaskIds,
+        wakeTime:            state.wakeTime,
+        sleepTime:           state.sleepTime,
+        preferences:         state.preferences,
+        constraints:         state.constraints,
+        deadlines:           state.deadlines,
+        currentStreak:       state.currentStreak,
+        longestStreak:       state.longestStreak,
+        lastStreakDate:       state.lastStreakDate,
+        isPremium:           state.isPremium,
+        hasSeenProOffer:     state.hasSeenProOffer,
+        trial:               state.trial,
+        dailyGenerations:    state.dailyGenerations,
+        lastGenerationDate:  state.lastGenerationDate,
         lastDailyReviewDate: state.lastDailyReviewDate,
+        lastAuthPromptDate:  state.lastAuthPromptDate,
       }),
       onRehydrateStorage: () => () => {
         queueMicrotask(() => {

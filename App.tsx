@@ -19,8 +19,14 @@ import { createSessionFromUrl } from './src/supabase/authCallback';
 import { supabase } from './src/supabase/client';
 import { syncOnboardingProfileToSupabase } from './src/repositories/profileSync';
 import { useAppStore } from './src/store/useAppStore';
+// import { useNotifications } from './src/notifications/useNotifications'; // requires dev build
 
 SplashScreenExpo.preventAutoHideAsync();
+
+function AppInner() {
+  // useNotifications(); // requires dev build — re-enable when building with EAS
+  return null;
+}
 
 export default function App() {
   const [fontsLoaded] = useFonts({
@@ -84,6 +90,7 @@ export default function App() {
     <SafeAreaProvider>
       <NavigationContainer>
         <StatusBar style="dark" />
+        <AppInner />
         <RootNavigator />
       </NavigationContainer>
     </SafeAreaProvider>

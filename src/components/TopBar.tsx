@@ -8,16 +8,21 @@ interface TopBarProps {
   progressValue?: number;
   stepLabel?: string;
   rightContent?: React.ReactNode;
+  onBack?: () => void;
+  onCancel?: () => void;
 }
 
-export function TopBar({ showProgress, progressValue = 0, stepLabel, rightContent }: TopBarProps) {
+export function TopBar({ showProgress, progressValue = 0, stepLabel, rightContent, onBack, onCancel }: TopBarProps) {
   return (
     <View style={styles.container}>
       <View style={styles.left}>
-        <View style={styles.logoIconWrap}>
-          <MaterialCommunityIcons name="lightning-bolt" size={14} color={Colors.onPrimary} />
-        </View>
-        <Text style={styles.logoText}>Momentum</Text>
+        {onBack ? (
+          <TouchableOpacity style={styles.backBtn} onPress={onBack} activeOpacity={0.7} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <MaterialCommunityIcons name="chevron-left" size={24} color={Colors.onSurface} />
+          </TouchableOpacity>
+        ) : (
+          <Text style={styles.logoText}>Momentum</Text>
+        )}
       </View>
       {showProgress ? (
         <View style={styles.progressContainer}>
@@ -26,8 +31,13 @@ export function TopBar({ showProgress, progressValue = 0, stepLabel, rightConten
           </View>
           {stepLabel ? <Text style={styles.stepLabel}>{stepLabel}</Text> : null}
         </View>
+      ) : onCancel ? (
+        <TouchableOpacity style={styles.cancelBtn} onPress={onCancel} activeOpacity={0.7} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <MaterialCommunityIcons name="close" size={13} color={Colors.onSurfaceVariant} />
+          <Text style={styles.cancelText}>Cancel</Text>
+        </TouchableOpacity>
       ) : (
-        rightContent ?? <View style={styles.avatar} />
+        rightContent ?? <View style={{ width: 36 }} />
       )}
     </View>
   );
@@ -48,14 +58,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-  },
-  logoIconWrap: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: Colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   logoText: {
     ...Typography.headlineSm,
@@ -83,10 +85,29 @@ const styles = StyleSheet.create({
     ...Typography.labelSm,
     color: Colors.secondary,
   },
-  avatar: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+  backBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: Colors.surfaceContainerHigh,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 20,
+    backgroundColor: Colors.surfaceContainerHigh,
+    borderWidth: 1,
+    borderColor: Colors.outlineVariant + '60',
+  },
+  cancelText: {
+    fontFamily: 'Manrope_600SemiBold',
+    fontSize: 12,
+    color: Colors.onSurfaceVariant,
+    letterSpacing: 0.2,
   },
 });

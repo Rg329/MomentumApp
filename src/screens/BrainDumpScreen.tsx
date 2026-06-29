@@ -6,21 +6,21 @@ import {
   TouchableOpacity,
   TextInput,
   Animated,
-  KeyboardAvoidingView,
   FlatList,
-  Modal,
   ScrollView,
   Easing,
   Dimensions,
   Keyboard,
   Platform,
+  Modal,
+  KeyboardAvoidingView,
+  Pressable,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import Svg, { Circle as SvgCircle } from 'react-native-svg';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/RootNavigator';
-import { Colors, Typography, Spacing, Radius } from '../theme';
+import { Colors, Typography, Spacing, Radius, Shadow } from '../theme';
 import { TopBar } from '../components/TopBar';
 import { WelcomeCard } from '../components/WelcomeCard';
 import { useAppStore, Task } from '../store/useAppStore';
@@ -28,6 +28,7 @@ import { usePersonalization } from '../personalization';
 import { usePremium, PREMIUM_COLOR } from '../monetization';
 import { PremiumBadge } from '../components/PremiumBadge';
 import { UpgradePrompt } from '../components/UpgradePrompt';
+import { DurationScrollPicker } from '../components/DurationScrollPicker';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'BrainDump'>;
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
@@ -42,7 +43,17 @@ const DURATION_PRESETS = [
   { label: '2 hr',   minutes: 120 },
 ];
 
-const SUGGESTIONS = ['Physics revision', 'Gym', 'Read 30 pages', 'Team meeting', 'Music practice'];
+const PRESET_MINUTES = new Set(DURATION_PRESETS.map((p) => p.minutes));
+const MIN_TASK_DURATION = 5;
+const MAX_TASK_DURATION = 480;
+
+function clampTaskDuration(minutes: number) {
+  return Math.min(MAX_TASK_DURATION, Math.max(MIN_TASK_DURATION, minutes));
+}
+
+function isPresetDuration(minutes: number) {
+  return PRESET_MINUTES.has(minutes);
+}
 
 function formatDuration(minutes: number) {
   return {
@@ -190,257 +201,204 @@ function AnimatedPrimaryButton({ label, onPress, disabled }: {
   );
 }
 
-// ─── Add Task Modal ───────────────────────────────────────────────────────────
-function AddTaskModal({ visible, onClose, onAdd }: {
+// ─── Add Task Modal (full-screen sheet — keyboard-safe) ───────────────────────
+function AddTaskModal({ visible, onClose, onAdd, editTaskId, initialText, initialDuration }: {
   visible: boolean;
   onClose: () => void;
   onAdd: (text: string, durationMinutes: number) => void;
+  editTaskId?: string | null;
+  initialText?: string;
+  initialDuration?: number;
 }) {
   const insets = useSafeAreaInsets();
   const defaultDuration = useAppStore((s) => s.preferences.defaultFocusDurationMinutes);
-  const [taskName, setTaskName]         = useState('');
+  const [taskName, setTaskName] = useState('');
   const [selectedDuration, setSelectedDuration] = useState(defaultDuration);
-  const [isCustom, setIsCustom]         = useState(false);
-  const [customHrs, setCustomHrs]       = useState('0');
-  const [customMin, setCustomMin]       = useState('30');
-  const [keyboardOpen, setKeyboardOpen] = useState(false);
-  const [hrsActive, setHrsActive]       = useState(false);
-  const [minActive, setMinActive]       = useState(false);
+  const [customMode, setCustomMode] = useState(false);
+  const wasVisibleRef = useRef(false);
 
-  const slideAnim    = useRef(new Animated.Value(700)).current;
-  const sec1Anim     = useRef(new Animated.Value(0)).current;   // header
-  const sec2Anim     = useRef(new Animated.Value(0)).current;   // task name
-  const sec3Anim     = useRef(new Animated.Value(0)).current;   // duration
-  const sec4Anim     = useRef(new Animated.Value(0)).current;   // info card
-  const customAnim   = useRef(new Animated.Value(0)).current;   // custom inputs
-  const clockGlow    = useRef(new Animated.Value(0)).current;
-
-  // Stagger sections in
-  const runEntrance = () => {
-    [sec1Anim, sec2Anim, sec3Anim, sec4Anim].forEach((a) => a.setValue(0));
-    Animated.stagger(80, [
-      Animated.spring(sec1Anim, { toValue: 1, useNativeDriver: true, tension: 80, friction: 12 }),
-      Animated.spring(sec2Anim, { toValue: 1, useNativeDriver: true, tension: 80, friction: 12 }),
-      Animated.spring(sec3Anim, { toValue: 1, useNativeDriver: true, tension: 80, friction: 12 }),
-      Animated.spring(sec4Anim, { toValue: 1, useNativeDriver: true, tension: 80, friction: 12 }),
-    ]).start();
-    // Clock glow pulse
-    Animated.loop(Animated.sequence([
-      Animated.timing(clockGlow, { toValue: 1, duration: 2200, useNativeDriver: false }),
-      Animated.timing(clockGlow, { toValue: 0, duration: 2200, useNativeDriver: false }),
-    ])).start();
-  };
+  const canSubmit = taskName.trim().length > 0;
 
   useEffect(() => {
-    if (visible) {
+    const justOpened = visible && !wasVisibleRef.current;
+    wasVisibleRef.current = visible;
+    if (!justOpened) return;
+
+    const duration = initialDuration ?? defaultDuration;
+    if (editTaskId != null && initialText != null) {
+      setTaskName(initialText);
+      setSelectedDuration(clampTaskDuration(duration));
+      setCustomMode(!isPresetDuration(duration));
+    } else {
       setTaskName('');
       setSelectedDuration(defaultDuration);
-      setIsCustom(false);
-      setCustomHrs('0');
-      setCustomMin(String(defaultDuration % 60 || defaultDuration));
-      Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, tension: 60, friction: 13 }).start(() => runEntrance());
-    } else {
-      Keyboard.dismiss();
-      Animated.timing(slideAnim, { toValue: 700, duration: 240, useNativeDriver: true }).start();
+      setCustomMode(false);
     }
-  }, [visible, defaultDuration]);
+  }, [visible, editTaskId, initialText, initialDuration, defaultDuration]);
 
-  useEffect(() => {
-    Animated.spring(customAnim, {
-      toValue: isCustom ? 1 : 0,
-      useNativeDriver: true, tension: 100, friction: 12,
-    }).start();
-  }, [isCustom]);
-
-  useEffect(() => {
-    const show = Keyboard.addListener('keyboardDidShow', () => setKeyboardOpen(true));
-    const hide  = Keyboard.addListener('keyboardDidHide', () => setKeyboardOpen(false));
-    return () => { show.remove(); hide.remove(); };
-  }, []);
-
-  const handleRequestClose = () => {
-    if (keyboardOpen) Keyboard.dismiss(); else onClose();
+  const submit = () => {
+    if (!canSubmit) return;
+    Keyboard.dismiss();
+    onAdd(taskName.trim(), clampTaskDuration(selectedDuration));
+    onClose();
   };
 
-  const effectiveMinutes = isCustom
-    ? Math.max(5, (parseInt(customHrs, 10) || 0) * 60 + (parseInt(customMin, 10) || 0))
-    : selectedDuration;
-  const { hrs, min } = formatDuration(effectiveMinutes);
+  const selectPreset = (minutes: number) => {
+    Keyboard.dismiss();
+    setCustomMode(false);
+    setSelectedDuration(minutes);
+  };
 
-  const sectionStyle = (anim: Animated.Value) => ({
-    opacity: anim,
-    transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [14, 0] }) }],
-  });
-
-  const clockBg = clockGlow.interpolate({ inputRange: [0, 1], outputRange: ['rgba(0,88,190,0.04)', 'rgba(0,88,190,0.09)'] });
+  const selectCustom = () => {
+    Keyboard.dismiss();
+    setCustomMode(true);
+  };
 
   return (
-    <Modal visible={visible} transparent animationType="none" onRequestClose={handleRequestClose}>
-      <KeyboardAvoidingView
-        style={{ flex: 1, justifyContent: 'flex-end' }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
-        <TouchableOpacity style={styles.scrim} activeOpacity={1} onPress={handleRequestClose} />
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={onClose}
+      statusBarTranslucent
+    >
+      <View style={styles.modalRoot}>
+        <Pressable style={styles.modalBackdrop} onPress={onClose} />
 
-        <Animated.View style={[styles.sheet, { paddingBottom: insets.bottom + 12, transform: [{ translateY: slideAnim }] }]}>
-        {/* ── Drag handle ── */}
-        <View style={styles.sheetHandle} />
-
-        {/* ── Header ── */}
-        <Animated.View style={[styles.sheetHeader, sectionStyle(sec1Anim)]}>
-          <TouchableOpacity onPress={onClose} style={styles.sheetBack} activeOpacity={0.7}>
-            <MaterialCommunityIcons name="arrow-left" size={19} color={Colors.onSurface} />
-          </TouchableOpacity>
-          <View style={{ alignItems: 'center' }}>
-            <Text style={styles.sheetTitle}>Add Task</Text>
-            <Text style={styles.sheetSubtitle}>Add something you want to accomplish today</Text>
-          </View>
-          <View style={{ width: 36 }} />
-        </Animated.View>
-
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag"
-          contentContainerStyle={{
-            gap: 20,
-            paddingTop: 4,
-            // Keep bottom actions visible when keyboard is open
-            paddingBottom: keyboardOpen ? 140 : 4,
-          }}
+        <KeyboardAvoidingView
+          style={styles.modalKav}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
         >
-          {/* ── Task Name ── */}
-          <Animated.View style={[{ gap: 8 }, sectionStyle(sec2Anim)]}>
-            <View style={styles.fieldLabel}>
-              <MaterialCommunityIcons name="format-list-bulleted" size={13} color={Colors.primary} />
-              <Text style={styles.fieldLabelText}>Task Name</Text>
-            </View>
-            <TextInput
-              style={styles.nameInput}
-              placeholder="e.g. Physics Revision"
-              placeholderTextColor={Colors.outline + '55'}
-              value={taskName}
-              onChangeText={setTaskName}
-              autoFocus
-              returnKeyType="next"
-            />
-          </Animated.View>
+          <View style={[styles.modalSheet, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+            <View style={styles.inlineHandle} />
 
-          {/* ── Duration ── */}
-          <Animated.View style={[{ gap: 12 }, sectionStyle(sec3Anim)]}>
-            <View style={styles.fieldLabel}>
-              <MaterialCommunityIcons name="clock-outline" size={13} color={Colors.primary} />
-              <Text style={styles.fieldLabelText}>How long will this take?</Text>
-            </View>
-
-            {/* Clock display with breathing glow */}
-            <Animated.View style={[styles.clockWrap, { backgroundColor: clockBg }]}>
-              <View style={{ alignItems: 'center', gap: 3 }}>
-                <Text style={styles.clockNumber}>{hrs}</Text>
-                <Text style={styles.clockUnitLabel}>HRS</Text>
+            <View style={styles.inlineHeader}>
+              <View style={styles.inlineHeaderLeft}>
+                <View style={styles.inlineIconWrap}>
+                  <MaterialCommunityIcons
+                    name={editTaskId ? 'pencil-outline' : 'plus'}
+                    size={16}
+                    color={Colors.primary}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.inlineTitle}>{editTaskId ? 'Edit task' : 'New task'}</Text>
+                  <Text style={styles.inlineSubtitle}>Name it, pick a duration, then add</Text>
+                </View>
               </View>
-              <Text style={styles.clockColon}>:</Text>
-              <View style={{ alignItems: 'center', gap: 3 }}>
-                <Text style={[styles.clockNumber, { color: Colors.primary }]}>{min}</Text>
-                <Text style={styles.clockUnitLabel}>MIN</Text>
-              </View>
-            </Animated.View>
+              <TouchableOpacity
+                style={styles.inlineCloseBtn}
+                onPress={onClose}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              >
+                <MaterialCommunityIcons name="close" size={18} color={Colors.onSurfaceVariant} />
+              </TouchableOpacity>
+            </View>
 
-            {/* Preset chips */}
-            <View style={styles.presetGrid}>
-              {DURATION_PRESETS.map((p) => (
-                <AnimatedChip
-                  key={p.minutes}
-                  label={p.label}
-                  selected={!isCustom && selectedDuration === p.minutes}
-                  onPress={() => { setSelectedDuration(p.minutes); setIsCustom(false); Keyboard.dismiss(); }}
-                />
-              ))}
-              <AnimatedChip
-                label="Custom"
-                selected={isCustom}
-                icon="pencil-outline"
-                onPress={() => setIsCustom(true)}
+            <View style={styles.inlineInputCard}>
+              <MaterialCommunityIcons name="format-list-checks" size={18} color={Colors.primary} />
+              <TextInput
+                style={styles.inlineInput}
+                placeholder="What do you want to accomplish?"
+                placeholderTextColor={Colors.outline + '90'}
+                value={taskName}
+                onChangeText={setTaskName}
+                returnKeyType="done"
+                onSubmitEditing={submit}
+                blurOnSubmit={false}
+                autoCorrect={false}
+                autoFocus
+                cursorColor={Colors.primary}
+                selectionColor={Colors.primaryFixed}
               />
             </View>
 
-            {/* Custom inputs — animated in/out */}
-            {isCustom ? (
-            <Animated.View style={{
-              opacity: customAnim,
-              transform: [{ scale: customAnim.interpolate({ inputRange: [0, 1], outputRange: [0.97, 1] }) }],
-            }}>
-              <View style={styles.customRow}>
-                {/* HRS box */}
-                <View style={styles.customUnit}>
-                  <TextInput
-                    style={[styles.customBox, hrsActive && styles.customBoxActive]}
-                    value={customHrs}
-                    onChangeText={(v) => setCustomHrs(v.replace(/[^0-9]/g, '').slice(0, 2))}
-                    keyboardType="number-pad"
-                    maxLength={2}
-                    selectTextOnFocus
-                    onFocus={() => setHrsActive(true)}
-                    onBlur={()  => setHrsActive(false)}
-                    textAlign="center"
-                  />
-                  <View style={[styles.customBoxCursor, hrsActive && styles.customBoxCursorActive]} />
-                  <Text style={styles.customBoxLabel}>Hours</Text>
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              bounces={false}
+              nestedScrollEnabled
+              style={styles.modalBodyScroll}
+              contentContainerStyle={styles.modalBodyContent}
+            >
+              <View style={styles.inlineDurationSection}>
+                <View style={styles.inlineDurationHeader}>
+                  <Text style={styles.inlineDurationLabel}>Duration</Text>
+                  <View style={styles.inlineDurationBadge}>
+                    <MaterialCommunityIcons name="clock-outline" size={12} color={Colors.primary} />
+                    <Text style={styles.inlineDurationBadgeText}>{durationLabel(selectedDuration)}</Text>
+                  </View>
                 </View>
 
-                <Text style={styles.customSeparator}>:</Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                  contentContainerStyle={styles.inlineChipRow}
+                >
+                  {DURATION_PRESETS.map((p) => {
+                    const active = !customMode && selectedDuration === p.minutes;
+                    return (
+                      <TouchableOpacity
+                        key={p.minutes}
+                        style={[styles.inlineChip, active && styles.inlineChipSelected]}
+                        onPress={() => selectPreset(p.minutes)}
+                        activeOpacity={0.75}
+                      >
+                        <Text style={[styles.inlineChipText, active && styles.inlineChipTextSelected]}>
+                          {p.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                  <TouchableOpacity
+                    style={[styles.inlineChip, customMode && styles.inlineChipSelected]}
+                    onPress={selectCustom}
+                    activeOpacity={0.75}
+                  >
+                    <MaterialCommunityIcons
+                      name="tune-variant"
+                      size={13}
+                      color={customMode ? Colors.onPrimary : Colors.onSurfaceVariant}
+                    />
+                    <Text style={[styles.inlineChipText, customMode && styles.inlineChipTextSelected]}>
+                      Custom
+                    </Text>
+                  </TouchableOpacity>
+                </ScrollView>
 
-                {/* MIN box */}
-                <View style={styles.customUnit}>
-                  <TextInput
-                    style={[styles.customBox, minActive && styles.customBoxActive]}
-                    value={customMin}
-                    onChangeText={(v) => setCustomMin(v.replace(/[^0-9]/g, '').slice(0, 2))}
-                    keyboardType="number-pad"
-                    maxLength={2}
-                    selectTextOnFocus
-                    onFocus={() => setMinActive(true)}
-                    onBlur={()  => setMinActive(false)}
-                    textAlign="center"
-                  />
-                  <View style={[styles.customBoxCursor, minActive && styles.customBoxCursorActive]} />
-                  <Text style={styles.customBoxLabel}>Minutes</Text>
-                </View>
+                {customMode && (
+                  <View style={styles.customBlock}>
+                    <DurationScrollPicker
+                      value={selectedDuration}
+                      onChange={setSelectedDuration}
+                      minMinutes={MIN_TASK_DURATION}
+                      maxMinutes={MAX_TASK_DURATION}
+                      onInteract={() => Keyboard.dismiss()}
+                    />
+                    <Text style={styles.customHint}>Scroll to set any duration from 5 min to 8 hr</Text>
+                  </View>
+                )}
               </View>
-            </Animated.View>
-            ) : null}
-          </Animated.View>
+            </ScrollView>
 
-          {/* ── Info card ── */}
-          <Animated.View style={[styles.infoCard, sectionStyle(sec4Anim)]}>
-            <View style={styles.infoIconWrap}>
-              <MaterialCommunityIcons name="calendar-check-outline" size={17} color={Colors.primary} />
-            </View>
-            <Text style={styles.infoText}>
-              This task will be scheduled automatically into your most productive hours.
-            </Text>
-          </Animated.View>
-        </ScrollView>
-
-        {/* ── Buttons ── */}
-        <View style={{ gap: 6, marginTop: 14 }}>
-          <AnimatedPrimaryButton
-            label="Add Task"
-            onPress={() => {
-              if (taskName.trim()) {
-                Keyboard.dismiss();
-                onAdd(taskName.trim(), effectiveMinutes);
-                onClose();
-              }
-            }}
-            disabled={!taskName.trim()}
-          />
-          <TouchableOpacity onPress={onClose} style={styles.cancelTouchable} activeOpacity={0.6}>
-            <Text style={styles.cancelLabel}>Cancel</Text>
-          </TouchableOpacity>
-        </View>
-        </Animated.View>
-      </KeyboardAvoidingView>
+            <TouchableOpacity
+              style={[styles.inlineConfirmBtn, !canSubmit && styles.inlineConfirmBtnDisabled]}
+              onPress={submit}
+              disabled={!canSubmit}
+              activeOpacity={0.88}
+            >
+              <Text style={styles.inlineConfirmLabel}>
+                {editTaskId ? 'Save changes' : 'Add task'}
+              </Text>
+              <View style={styles.inlineConfirmIcon}>
+                <MaterialCommunityIcons name="arrow-up" size={16} color={Colors.primary} />
+              </View>
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }
@@ -514,131 +472,49 @@ function CapacityCard({ plannedMins, availableMins }: { plannedMins: number; ava
 }
 
 // ─── Today's Plan preview card ────────────────────────────────────────────────
-// ── Animated SVG ring for completion percentage ───────────────────────────────
 
-const RING_SIZE   = 80;
-const RING_STROKE = 6;
-const RING_R      = (RING_SIZE - RING_STROKE) / 2;
-const RING_CIRC   = 2 * Math.PI * RING_R;
-
-const AnimatedSvgCircle = Animated.createAnimatedComponent(SvgCircle);
-
-function CompletionRing({ pct }: { pct: number }) {
-  const [display, setDisplay]   = useState(0);
-  const dashAnim                = useRef(new Animated.Value(RING_CIRC)).current; // starts "empty"
-  const glowAnim                = useRef(new Animated.Value(0)).current;
-  const arcColor = pct >= 80 ? Colors.primary : pct >= 50 ? '#f59e0b' : '#ef4444';
-
-  useEffect(() => {
-    // Count-up display number
-    let cur = 0;
-    const step = Math.max(1, Math.ceil(pct / 30));
-    const timer = setInterval(() => {
-      cur = Math.min(cur + step, pct);
-      setDisplay(cur);
-      if (cur >= pct) clearInterval(timer);
-    }, 33);
-
-    // Animate stroke-dashoffset: RING_CIRC (empty) → RING_CIRC * (1 - pct/100)
-    const target = RING_CIRC * (1 - pct / 100);
-    Animated.timing(dashAnim, {
-      toValue: target, duration: 1100,
-      useNativeDriver: false,
-      easing: Easing.out(Easing.cubic),
-    }).start();
-
-    // Glow pulse for high completion
-    if (pct >= 80) {
-      Animated.loop(Animated.sequence([
-        Animated.timing(glowAnim, { toValue: 1, duration: 1400, useNativeDriver: true }),
-        Animated.timing(glowAnim, { toValue: 0.4, duration: 1400, useNativeDriver: true }),
-      ])).start();
-    }
-    return () => clearInterval(timer);
-  }, [pct]);
-
-  const glowOpacity = glowAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.22] });
-
-  return (
-    <View style={styles.completionRing}>
-      {/* Soft glow halo (only for high pct) */}
-      {pct >= 80 && (
-        <Animated.View style={[styles.completionGlow, { opacity: glowOpacity, borderColor: arcColor }]} />
-      )}
-
-      <Svg width={RING_SIZE} height={RING_SIZE} style={{ position: 'absolute' }}>
-        {/* Track */}
-        <SvgCircle
-          cx={RING_SIZE / 2} cy={RING_SIZE / 2} r={RING_R}
-          stroke={Colors.primaryFixed} strokeWidth={RING_STROKE} fill="none"
-        />
-        {/* Animated fill arc */}
-        <AnimatedSvgCircle
-          cx={RING_SIZE / 2} cy={RING_SIZE / 2} r={RING_R}
-          stroke={arcColor} strokeWidth={RING_STROKE} fill="none"
-          strokeLinecap="round"
-          strokeDasharray={RING_CIRC}
-          strokeDashoffset={dashAnim}
-          rotation="-90"
-          origin={`${RING_SIZE / 2}, ${RING_SIZE / 2}`}
-        />
-      </Svg>
-
-      {/* Center label */}
-      <View style={styles.completionRingInner}>
-        <Text style={[styles.completionPct, { color: arcColor }]}>{display}%</Text>
-        <Text style={styles.completionLabel}>Est. Done</Text>
-      </View>
-    </View>
-  );
-}
-
-function PlanPreviewCard({ tasks, plannedMins, availableMins }: {
-  tasks: Task[]; plannedMins: number; availableMins: number;
+function PlanPreviewCard({ tasks, plannedMins, onPress }: {
+  tasks: Task[]; plannedMins: number; onPress: () => void;
 }) {
-  const focusBlocks      = tasks.filter((t) => t.durationMinutes >= 45).length;
-  const exerciseSessions = tasks.filter((t) => /gym|workout|exercise|run|sport|walk|yoga/i.test(t.text)).length;
-  const bufferSlots      = Math.max(1, Math.floor(tasks.length / 3));
-  const completionPct    = availableMins >= plannedMins
-    ? Math.min(100, Math.round(95 - ((plannedMins / Math.max(availableMins, 1)) * 5)))
-    : Math.round((availableMins / Math.max(plannedMins, 1)) * 85);
+  const preview = tasks.slice(0, 3);
+  const remaining = tasks.length - preview.length;
+  const scale = useRef(new Animated.Value(1)).current;
 
-  const planItems = [
-    focusBlocks > 0      && { icon: 'lightning-bolt'            as IconName, label: `${focusBlocks} Focus Block${focusBlocks > 1 ? 's' : ''}` },
-    exerciseSessions > 0 && { icon: 'dumbbell'                  as IconName, label: `${exerciseSessions} Exercise Session${exerciseSessions > 1 ? 's' : ''}` },
-    tasks.length > 0     && { icon: 'clock-time-three-outline'  as IconName, label: `${bufferSlots} Buffer Slot${bufferSlots > 1 ? 's' : ''}` },
-  ].filter(Boolean) as { icon: IconName; label: string }[];
+  const handlePressIn = () =>
+    Animated.spring(scale, { toValue: 0.97, useNativeDriver: true, tension: 300, friction: 20 }).start();
+  const handlePressOut = () =>
+    Animated.spring(scale, { toValue: 1, useNativeDriver: true, tension: 300, friction: 20 }).start();
 
   return (
-    <View style={styles.previewCard}>
+    <TouchableOpacity onPress={onPress} onPressIn={handlePressIn} onPressOut={handlePressOut} activeOpacity={1}>
+      <Animated.View style={[styles.previewCard, { transform: [{ scale }] }]}>
       <View style={styles.previewHeader}>
         <View style={styles.capacityBadge}>
           <MaterialCommunityIcons name="calendar-text" size={11} color={Colors.primary} />
           <Text style={styles.capacityBadgeText}>Today's Plan</Text>
         </View>
-        <Text style={styles.previewHint}>Preview</Text>
+        <Text style={styles.previewHint}>{tasks.length} task{tasks.length !== 1 ? 's' : ''} · {durationLabel(plannedMins)}</Text>
       </View>
 
-      <View style={styles.previewBody}>
-        {/* Plan items */}
-        <View style={styles.previewItems}>
-          {planItems.map((item, i) => (
-            <View key={i} style={styles.previewItem}>
-              <View style={styles.previewItemIcon}>
-                <MaterialCommunityIcons name={item.icon} size={13} color={Colors.primary} />
-              </View>
-              <Text style={styles.previewItemText}>{item.label}</Text>
-            </View>
-          ))}
-        </View>
-
-        {/* Animated completion ring */}
-        <CompletionRing pct={completionPct} />
+      <View style={styles.previewItems}>
+        {preview.map((task, i) => (
+          <View key={task.id} style={styles.previewItem}>
+            <View style={styles.previewItemDot} />
+            <Text style={styles.previewItemText} numberOfLines={1}>{task.text}</Text>
+            <Text style={styles.previewItemDuration}>{durationLabel(task.durationMinutes)}</Text>
+          </View>
+        ))}
+        {remaining > 0 && (
+          <Text style={styles.previewMore}>+{remaining} more</Text>
+        )}
       </View>
-    </View>
+      </Animated.View>
+    </TouchableOpacity>
   );
 }
-function TaskRow({ task, index, onRemove }: { task: Task; index: number; onRemove: () => void }) {
+function TaskRow({ task, index, onRemove, onLongPress }: {
+  task: Task; index: number; onRemove: () => void; onLongPress: () => void;
+}) {
   const anim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.spring(anim, { toValue: 1, useNativeDriver: true, delay: index * 55, tension: 75, friction: 11 }).start();
@@ -649,16 +525,23 @@ function TaskRow({ task, index, onRemove }: { task: Task; index: number; onRemov
       styles.taskRow,
       { opacity: anim, transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }] },
     ]}>
-      <View style={styles.taskIndexBadge}>
-        <Text style={styles.taskIndexText}>{String(index + 1).padStart(2, '0')}</Text>
-      </View>
-      <View style={{ flex: 1, gap: 5 }}>
-        <Text style={styles.taskText}>{task.text}</Text>
-        <View style={styles.taskDurationPill}>
-          <MaterialCommunityIcons name="timer-outline" size={11} color={Colors.primary} />
-          <Text style={styles.taskDurationText}>{durationLabel(task.durationMinutes)}</Text>
+      <TouchableOpacity
+        style={styles.taskRowPressable}
+        onLongPress={onLongPress}
+        delayLongPress={400}
+        activeOpacity={0.85}
+      >
+        <View style={styles.taskIndexBadge}>
+          <Text style={styles.taskIndexText}>{String(index + 1).padStart(2, '0')}</Text>
         </View>
-      </View>
+        <View style={{ flex: 1, gap: 5 }}>
+          <Text style={styles.taskText}>{task.text}</Text>
+          <View style={styles.taskDurationPill}>
+            <MaterialCommunityIcons name="timer-outline" size={11} color={Colors.primary} />
+            <Text style={styles.taskDurationText}>{durationLabel(task.durationMinutes)}</Text>
+          </View>
+        </View>
+      </TouchableOpacity>
       <TouchableOpacity onPress={onRemove} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
         <MaterialCommunityIcons name="close" size={15} color={Colors.outline + 'aa'} />
       </TouchableOpacity>
@@ -666,14 +549,109 @@ function TaskRow({ task, index, onRemove }: { task: Task; index: number; onRemov
   );
 }
 
+// ─── Streak Bar ───────────────────────────────────────────────────────────────
+function StreakBar({ navigation }: { navigation: Props['navigation'] }) {
+  const currentStreak = useAppStore((s) => s.currentStreak);
+  const longestStreak = useAppStore((s) => s.longestStreak);
+  const isPremium     = useAppStore((s) => s.isPremium);
+  const scale         = useRef(new Animated.Value(0.92)).current;
+  const opacity       = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.spring(scale,   { toValue: 1, useNativeDriver: true, tension: 80, friction: 10, delay: 300 }),
+      Animated.timing(opacity, { toValue: 1, duration: 500, useNativeDriver: true, delay: 300 }),
+    ]).start();
+  }, []);
+
+  const handlePress = () => {
+    if (!isPremium) navigation.navigate('Premium');
+  };
+
+  return (
+    <Animated.View style={[styles.streakBar, { opacity, transform: [{ scale }] }]}>
+      {/* Inner shine strip */}
+      <View style={styles.streakShine} pointerEvents="none" />
+
+      {/* Current streak — always visible */}
+      <View style={styles.streakItem}>
+        <View style={styles.streakFireRow}>
+          <Text style={styles.streakNumber}>{currentStreak}</Text>
+          <Text style={styles.streakFireEmoji}>🔥</Text>
+        </View>
+        <Text style={styles.streakLabel}>Day Streak</Text>
+      </View>
+
+      <View style={styles.streakDivider} />
+
+      {/* Best streak — locked for free */}
+      <TouchableOpacity style={styles.streakItem} onPress={handlePress} activeOpacity={isPremium ? 1 : 0.75}>
+        {isPremium ? (
+          <>
+            <Text style={styles.streakNumber}>{longestStreak}</Text>
+            <Text style={styles.streakLabel}>Best Streak</Text>
+          </>
+        ) : (
+          <>
+            <View style={styles.streakLockedRow}>
+              <Text style={styles.streakLockedNumber}>––</Text>
+            </View>
+            <View style={styles.streakLockedLabel}>
+              <MaterialCommunityIcons name="lock-outline" size={9} color={Colors.primary} />
+              <Text style={[styles.streakLabel, { color: Colors.primary }]}>Best Streak</Text>
+            </View>
+          </>
+        )}
+      </TouchableOpacity>
+
+      <View style={styles.streakDivider} />
+
+      {/* Momentum score — locked for free */}
+      <TouchableOpacity style={styles.streakItem} onPress={handlePress} activeOpacity={isPremium ? 1 : 0.75}>
+        {isPremium ? (
+          <>
+            <Text style={styles.streakNumber}>{Math.min(99, currentStreak * 7)}</Text>
+            <Text style={styles.streakLabel}>Momentum</Text>
+          </>
+        ) : (
+          <>
+            <View style={styles.streakLockedRow}>
+              <Text style={styles.streakLockedNumber}>––</Text>
+            </View>
+            <View style={styles.streakLockedLabel}>
+              <MaterialCommunityIcons name="lock-outline" size={9} color={Colors.primary} />
+              <Text style={[styles.streakLabel, { color: Colors.primary }]}>Momentum</Text>
+            </View>
+          </>
+        )}
+      </TouchableOpacity>
+    </Animated.View>
+  );
+}
+
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export function BrainDumpScreen({ navigation }: Props) {
-  const { tasks, addTask, removeTask, wakeTime, sleepTime, hasSeenWelcomeCard, dismissWelcomeCard, incrementGeneration } = useAppStore();
+  const { tasks, addTask, updateTask, removeTask, wakeTime, sleepTime, hasSeenWelcomeCard, dismissWelcomeCard, incrementGeneration } = useAppStore();
+  const procrastinationType = useAppStore((s) => s.onboardingData.procrastinationType);
+
+  const SUGGESTIONS_BY_TYPE: Record<string, string[]> = {
+    overwhelmed_tasks:  ['Reply to 3 emails', 'Write one paragraph', '10-min tidy up', 'Check one item off', 'Review your notes'],
+    waiting_motivation: ['Set a 10-min timer and start', 'Write the first sentence', 'Open the file', 'Do the easiest part first', 'Commit to 5 minutes'],
+    dont_know_start:    ['Write down step 1', 'Find one resource', 'Sketch an outline', 'Define done in one sentence', 'Ask one clarifying question'],
+    easily_distracted:  ['25-min Pomodoro block', 'Phone in another room', 'Single-tab browser session', 'Headphones on, notifications off', 'One task until timer ends'],
+    changing_plans:     ['Lock in 3 tasks for today', 'No rescheduling before noon', 'Finish one before adding another', 'Write a 2-line plan', 'Pick one anchor task'],
+    underestimate_time: ['Buffer this task by 50%', 'Set a hard stop time', 'Break into 3 steps', 'Track time on one task', 'Stop at the timer — not when done'],
+  };
+
+  const SUGGESTIONS = SUGGESTIONS_BY_TYPE[procrastinationType ?? '']
+    ?? ['Deep work block', 'Admin tasks', 'Planning session', 'Email catch-up', 'Review & reflect'];
+
   const pm = usePremium();
   const [showUpgradePrompt, setShowUpgradePrompt] = useState(false);
   const p           = usePersonalization();
   const insets      = useSafeAreaInsets();
   const [showModal, setShowModal] = useState(false);
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [loading, setLoading]     = useState(false);
   const buttonScale  = useRef(new Animated.Value(1)).current;
   const addBtnScale  = useRef(new Animated.Value(1)).current;
@@ -686,9 +664,9 @@ export function BrainDumpScreen({ navigation }: Props) {
   const subtext       = p.dashboardSubtext;
   const motivation    = p.motivationalQuotes[new Date().getDay() % p.motivationalQuotes.length];
   const plannedMins   = tasks.reduce((acc, t) => acc + t.durationMinutes, 0);
-  // Cap available productive hours at 10h; subtract 2h overhead from awake window
+  // Awake window minus 2h overhead (meals, commute, personal)
   const awakeMins     = Math.max(0, sleepTime - wakeTime);
-  const availableMins = Math.min(awakeMins - 120, 600); // max 10h productive
+  const availableMins = Math.max(0, awakeMins - 120);
 
   const suggestionsToShow = SUGGESTIONS
     .filter((s) => !tasks.find((t) => t.text.toLowerCase() === s.toLowerCase()))
@@ -700,6 +678,28 @@ export function BrainDumpScreen({ navigation }: Props) {
       Animated.timing(heroSlide, { toValue: 0, duration: 700, easing: Easing.out(Easing.quad), useNativeDriver: true }),
     ]).start();
   }, []);
+
+  const editingTask = editingTaskId ? tasks.find((t) => t.id === editingTaskId) : undefined;
+
+  const closeModal = () => {
+    Keyboard.dismiss();
+    setShowModal(false);
+    setEditingTaskId(null);
+  };
+
+  const openNewTaskModal = () => {
+    Keyboard.dismiss();
+    setEditingTaskId(null);
+    setShowModal(true);
+  };
+
+  const handleModalConfirm = (text: string, durationMinutes: number) => {
+    if (editingTaskId) {
+      updateTask(editingTaskId, text, durationMinutes);
+    } else {
+      addTask(text, durationMinutes);
+    }
+  };
 
   const handleGenerate = () => {
     if (!hasTasks) return;
@@ -720,20 +720,28 @@ export function BrainDumpScreen({ navigation }: Props) {
       <TopBar />
 
       {/* Animated background blobs */}
-      <SoftBlob x={-70}         y={80}            size={260} color="rgba(0,88,190,0.06)"    dur={4500} delay={0}   />
-      <SoftBlob x={width - 110} y={200}            size={190} color="rgba(0,88,190,0.045)"   dur={5200} delay={500} />
-      <SoftBlob x={width/2-80}  y={height * 0.4}  size={150} color="rgba(100,160,255,0.05)" dur={3900} delay={900} />
-      <SoftBlob x={30}          y={height * 0.6}  size={110} color="rgba(0,88,190,0.035)"   dur={4800} delay={300} />
+      <SoftBlob x={-80}         y={60}            size={300} color="rgba(0,88,190,0.07)"    dur={4500} delay={0}   />
+      <SoftBlob x={width - 120} y={180}            size={220} color="rgba(0,88,190,0.055)"   dur={5200} delay={500} />
+      <SoftBlob x={width/2-90}  y={height * 0.38} size={180} color="rgba(100,160,255,0.06)" dur={3900} delay={900} />
+      <SoftBlob x={20}          y={height * 0.62} size={140} color="rgba(0,88,190,0.045)"   dur={4800} delay={300} />
 
       <View style={{ flex: 1 }}>
 
         {/* ── Hero Header ── */}
         <Animated.View style={[styles.hero, { opacity: heroFade, transform: [{ translateY: heroSlide }] }]}>
-          {/* Greeting chip + coach badge row */}
-          <View style={styles.greetingRow}>
-            <MaterialCommunityIcons name="weather-sunny" size={16} color={Colors.primary} />
-            <Text style={styles.greetingText}>{greeting}</Text>
-            {/* Coach-mode badge */}
+          {/* Ambient glow behind hero */}
+          <View style={styles.heroGlow} pointerEvents="none" />
+
+          <View style={styles.heroRow}>
+            <View style={{ flex: 1, gap: 4 }}>
+              <View style={styles.greetingChip}>
+                <MaterialCommunityIcons name="weather-sunny" size={12} color={Colors.primary} />
+                <Text style={styles.greetingText}>{greeting}</Text>
+              </View>
+              <Text style={styles.heroTitle}>
+                What's on your{'\n'}<Text style={styles.heroTitleAccent}>mind today?</Text>
+              </Text>
+            </View>
             {p.profile.coachStyle && (
               <View style={[styles.coachBadge, { backgroundColor: p.tone.badgeColor + '18', borderColor: p.tone.badgeColor + '35' }]}>
                 <View style={[styles.coachBadgeDot, { backgroundColor: p.tone.badgeColor }]} />
@@ -741,17 +749,16 @@ export function BrainDumpScreen({ navigation }: Props) {
               </View>
             )}
           </View>
-          <Text style={styles.heroTitle}>
-            What's on your{'\n'}
-            <Text style={styles.heroTitleAccent}>mind today?</Text>
-          </Text>
-          {/* Personalized subtext */}
+
+          {/* Subtle motivational line */}
           <View style={styles.motivationRow}>
-            <MaterialCommunityIcons name="star-four-points" size={11} color={Colors.primary} style={{ opacity: 0.7 }} />
-            <Text style={styles.motivationText}>{motivation}</Text>
+            <View style={styles.motivationAccent} />
+            <Text style={styles.motivationText} numberOfLines={1}>{motivation}</Text>
           </View>
-          <Text style={styles.subtextRow}>{subtext}</Text>
         </Animated.View>
+
+        {/* ── Streak bar ── */}
+        <StreakBar navigation={navigation} />
 
         {/* ── Task list / Empty state ── */}
         <FlatList
@@ -760,6 +767,9 @@ export function BrainDumpScreen({ navigation }: Props) {
           style={styles.list}
           contentContainerStyle={[styles.listContent, !hasTasks && styles.listContentEmpty]}
           showsVerticalScrollIndicator={false}
+          keyboardDismissMode="on-drag"
+          keyboardShouldPersistTaps="handled"
+          onScrollBeginDrag={Keyboard.dismiss}
           ListHeaderComponent={
             !hasSeenWelcomeCard ? (
               <WelcomeCard
@@ -793,45 +803,43 @@ export function BrainDumpScreen({ navigation }: Props) {
           }
           ListFooterComponent={
             hasTasks ? (
-              <View style={{ gap: 12, marginTop: 4 }}>
-                {/* Capacity card */}
+              <View style={{ gap: 10, marginTop: 4 }}>
                 <CapacityCard plannedMins={plannedMins} availableMins={availableMins} />
-
-                {/* Plan preview card */}
-                <PlanPreviewCard tasks={tasks} plannedMins={plannedMins} availableMins={availableMins} />
-
-                {/* Quick add */}
-                {suggestionsToShow.length > 0 && (
-                  <View style={styles.footerSuggestions}>
-                    <Text style={styles.footerSuggestionsLabel}>Quick add</Text>
-                    <View style={styles.suggestions}>
-                      {suggestionsToShow.map((s) => (
-                        <TouchableOpacity key={s} style={styles.suggestionChip} onPress={() => addTask(s, 30)} activeOpacity={0.7}>
-                          <MaterialCommunityIcons name="plus" size={13} color={Colors.primary} />
-                          <Text style={styles.suggestionText}>{s}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  </View>
-                )}
+                <PlanPreviewCard tasks={tasks} plannedMins={plannedMins} onPress={() => navigation.navigate('MainTabs', { screen: 'Schedule' })} />
               </View>
             ) : null
           }
           renderItem={({ item, index }: { item: Task; index: number }) => (
-            <TaskRow task={item} index={index} onRemove={() => removeTask(item.id)} />
+            <TaskRow
+              task={item}
+              index={index}
+              onRemove={() => removeTask(item.id)}
+              onLongPress={() => {
+                const task = tasks.find((t) => t.id === item.id);
+                if (!task) return;
+                Keyboard.dismiss();
+                setEditingTaskId(task.id);
+                setShowModal(true);
+              }}
+            />
           )}
         />
 
-        {/* ── Summary pill (only shown when no tasks — for spacing) ── */}
-        {hasTasks && <View style={{ height: 8 }} />}
+        <AddTaskModal
+          visible={showModal}
+          onClose={closeModal}
+          onAdd={handleModalConfirm}
+          editTaskId={editingTaskId}
+          initialText={editingTask?.text}
+          initialDuration={editingTask?.durationMinutes}
+        />
 
-        {/* ── Bottom bar ── */}
-        <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+        {!showModal && <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
           {/* Add Task button */}
           <Animated.View style={{ transform: [{ scale: addBtnScale }] }}>
             <TouchableOpacity
               style={styles.addBtn}
-              onPress={() => setShowModal(true)}
+              onPress={openNewTaskModal}
               activeOpacity={1}
               onPressIn={() => Animated.spring(addBtnScale, { toValue: 0.92, useNativeDriver: true, tension: 400, friction: 8 }).start()}
               onPressOut={() => Animated.sequence([
@@ -864,8 +872,7 @@ export function BrainDumpScreen({ navigation }: Props) {
               ) : pm.generationsExhausted ? (
                 <>
                   <MaterialCommunityIcons name="lock-outline" size={15} color="#fff" />
-                  <Text style={styles.generateBtnLabel} numberOfLines={1}>Unlock Regenerations</Text>
-                  <PremiumBadge size="sm" shimmer />
+                  <Text style={styles.generateBtnLabel}>Go Pro to Regenerate</Text>
                 </>
               ) : (
                 <>
@@ -885,14 +892,8 @@ export function BrainDumpScreen({ navigation }: Props) {
               <View style={styles.ctaShine} pointerEvents="none" />
             </TouchableOpacity>
           </Animated.View>
-        </View>
+        </View>}
       </View>
-
-      <AddTaskModal
-        visible={showModal}
-        onClose={() => setShowModal(false)}
-        onAdd={(text, dur) => addTask(text, dur)}
-      />
 
       <UpgradePrompt
         visible={showUpgradePrompt}
@@ -907,57 +908,159 @@ export function BrainDumpScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
 
+  // Streak bar
+  streakBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: Spacing.gutter,
+    marginBottom: 12,
+    backgroundColor: Colors.surfaceContainerLowest,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: Colors.primary + '22',
+    paddingVertical: 14,
+    overflow: 'hidden',
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  streakShine: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0,
+    height: 1,
+    backgroundColor: Colors.primary + '20',
+  },
+  streakItem: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 3,
+  },
+  streakFireRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 2,
+  },
+  streakFireEmoji: {
+    fontSize: 14,
+    lineHeight: 28,
+  },
+  streakNumber: {
+    fontFamily: 'Manrope_800ExtraBold',
+    fontSize: 26,
+    color: Colors.primary,
+    lineHeight: 28,
+    letterSpacing: -1,
+  },
+  streakLabel: {
+    fontFamily: 'Manrope_600SemiBold',
+    fontSize: 10,
+    color: Colors.onSurfaceVariant,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  streakDivider: {
+    width: StyleSheet.hairlineWidth,
+    height: 36,
+    backgroundColor: Colors.outlineVariant + '60',
+  },
+  streakLockedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  streakLockedNumber: {
+    fontFamily: 'Manrope_800ExtraBold',
+    fontSize: 26,
+    color: Colors.outlineVariant,
+    lineHeight: 28,
+    letterSpacing: -1,
+  },
+  streakLockedLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+
   // Hero
   hero: {
     paddingHorizontal: Spacing.gutter,
-    paddingTop: 20,
-    paddingBottom: 16,
+    paddingTop: 16,
+    paddingBottom: 14,
     gap: 10,
   },
-  greetingRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: Colors.primaryFixed + '80',
-    alignSelf: 'flex-start',
-    paddingHorizontal: 12, paddingVertical: 5,
-    borderRadius: Radius.full,
+  heroGlow: {
+    position: 'absolute',
+    top: -40, left: -60,
+    width: 280, height: 180,
+    borderRadius: 140,
+    backgroundColor: Colors.primary + '0a',
   },
-  greetingText: { ...Typography.labelSm, color: Colors.primary, fontSize: 12, fontFamily: 'Manrope_600SemiBold' },
+  heroRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  greetingChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    alignSelf: 'flex-start',
+    backgroundColor: Colors.primaryFixed + '90',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: Radius.full,
+    marginBottom: 6,
+  },
+  greetingText: {
+    fontFamily: 'Manrope_600SemiBold',
+    fontSize: 11,
+    color: Colors.primary,
+    letterSpacing: 0.2,
+  },
   coachBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: 8, paddingVertical: 3,
+    paddingHorizontal: 8, paddingVertical: 4,
     borderRadius: Radius.full, borderWidth: 1,
-    marginLeft: 4,
+    marginTop: 2,
   },
   coachBadgeDot: { width: 5, height: 5, borderRadius: 2.5 },
   coachBadgeLabel: { fontFamily: 'Manrope_600SemiBold', fontSize: 10, letterSpacing: 0.3 },
-  subtextRow: {
-    fontFamily: 'Manrope_500Medium', fontSize: 13,
-    color: Colors.onSurfaceVariant, lineHeight: 19,
-    marginTop: 4,
-  },
   heroTitle: {
-    ...Typography.displayLg,
+    fontFamily: 'Manrope_800ExtraBold',
     color: Colors.onSurface,
-    fontSize: 32,
-    lineHeight: 42,
+    fontSize: 28,
+    lineHeight: 34,
+    letterSpacing: -0.5,
   },
   heroTitleAccent: {
     color: Colors.primary,
-    fontFamily: 'Manrope_800ExtraBold',
   },
   motivationRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  motivationAccent: {
+    width: 3,
+    height: 14,
+    borderRadius: 2,
+    backgroundColor: Colors.primary,
+    opacity: 0.4,
   },
   motivationText: {
-    ...Typography.bodyMd,
+    flex: 1,
+    fontFamily: 'Manrope_500Medium',
+    fontSize: 12,
     color: Colors.onSurfaceVariant,
     fontStyle: 'italic',
-    opacity: 0.8,
+    opacity: 0.85,
   },
 
   // List
   list: { flex: 1 },
-  listContent: { paddingHorizontal: Spacing.gutter, paddingTop: 4, paddingBottom: 8 },
+  listContent: { paddingHorizontal: Spacing.gutter, paddingTop: 2, paddingBottom: 8 },
   listContentEmpty: { flexGrow: 1 },
 
   // Empty state
@@ -987,28 +1090,36 @@ const styles = StyleSheet.create({
   // Task row
   taskRow: {
     flexDirection: 'row', alignItems: 'center',
-    paddingVertical: 14, paddingHorizontal: 14,
+    paddingVertical: 13, paddingHorizontal: 14,
     backgroundColor: Colors.surfaceContainerLowest,
-    borderRadius: Radius.lg, marginBottom: 10,
-    borderWidth: 1, borderColor: Colors.outlineVariant + '28',
+    borderRadius: 16, marginBottom: 8,
+    borderWidth: 1, borderColor: Colors.outlineVariant + '30',
     gap: 12,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.05, shadowRadius: 10, elevation: 3,
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.06, shadowRadius: 10, elevation: 3,
+    overflow: 'hidden',
+  },
+  taskRowPressable: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12,
   },
   taskIndexBadge: {
-    width: 34, height: 34, borderRadius: 10,
+    width: 32, height: 32, borderRadius: 10,
     backgroundColor: Colors.primaryFixed,
     alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: Colors.primary + '18',
   },
-  taskIndexText: { fontFamily: 'Manrope_700Bold', fontSize: 12, color: Colors.primary },
-  taskText: { ...Typography.headlineSm, color: Colors.onSurface, fontSize: 15 },
+  taskIndexText: { fontFamily: 'Manrope_800ExtraBold', fontSize: 12, color: Colors.primary },
+  taskText: { fontFamily: 'Manrope_600SemiBold', color: Colors.onSurface, fontSize: 14, lineHeight: 20 },
   taskDurationPill: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
     alignSelf: 'flex-start',
     backgroundColor: Colors.primaryFixed,
-    paddingHorizontal: 8, paddingVertical: 3, borderRadius: Radius.full,
+    paddingHorizontal: 8, paddingVertical: 3,
+    borderRadius: Radius.full,
+    borderWidth: 1, borderColor: Colors.primary + '15',
   },
-  taskDurationText: { ...Typography.labelXs, color: Colors.primary, fontSize: 11 },
+  taskDurationText: { fontFamily: 'Manrope_600SemiBold', color: Colors.primary, fontSize: 11 },
 
   // Summary
   summaryRow: { paddingHorizontal: Spacing.gutter, paddingBottom: 6 },
@@ -1059,10 +1170,171 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.07)', transform: [{ skewX: '-20deg' }],
   },
 
-  // Modal sheet
-  scrim: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)' },
+  // Add task modal
+  modalRoot: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+  },
+  modalKav: {
+    width: '100%',
+    maxHeight: height * 0.92,
+  },
+  modalSheet: {
+    backgroundColor: Colors.surfaceContainerLowest,
+    borderTopLeftRadius: Radius.xl,
+    borderTopRightRadius: Radius.xl,
+    paddingHorizontal: Spacing.gutter,
+    paddingTop: 8,
+    gap: 12,
+    ...Shadow.card,
+  },
+  modalBodyScroll: {
+    maxHeight: height * 0.38,
+  },
+  modalBodyContent: {
+    paddingBottom: 4,
+  },
+
+  // Inline add task panel (legacy name kept for shared child styles)
+  inlinePanel: {
+    backgroundColor: Colors.surfaceContainerLowest,
+    borderTopLeftRadius: Radius.xl,
+    borderTopRightRadius: Radius.xl,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: Colors.outlineVariant + '40',
+    paddingHorizontal: Spacing.gutter,
+    paddingTop: 8,
+    gap: 10,
+    maxHeight: height * 0.72,
+    ...Shadow.card,
+  },
+  inlineHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: Colors.outlineVariant + 'aa',
+    alignSelf: 'center',
+    marginBottom: 2,
+  },
+  inlineHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  inlineHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
+  inlineIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: Colors.primaryFixed + '90',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  inlineTitle: { fontFamily: 'Manrope_700Bold', fontSize: 16, color: Colors.onSurface, letterSpacing: -0.2 },
+  inlineSubtitle: { fontFamily: 'Manrope_400Regular', fontSize: 12, color: Colors.onSurfaceVariant, marginTop: 1 },
+  inlineCloseBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: Colors.surfaceContainer,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  inlineInputCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: Colors.surfaceContainerLow,
+    borderRadius: Radius.lg,
+    borderWidth: 1.5,
+    borderColor: Colors.primary + '18',
+    paddingHorizontal: 14,
+    paddingVertical: 4,
+    marginBottom: 14,
+  },
+  inlineInput: {
+    flex: 1,
+    fontFamily: 'Manrope_500Medium',
+    fontSize: 16,
+    color: Colors.onSurface,
+    paddingVertical: 12,
+    minHeight: 44,
+  },
+  inlineDurationSection: { gap: 10 },
+  inlineDurationHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  inlineDurationLabel: {
+    fontFamily: 'Manrope_600SemiBold',
+    fontSize: 11,
+    color: Colors.outline,
+    textTransform: 'uppercase',
+    letterSpacing: 0.9,
+  },
+  inlineDurationBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: Colors.primaryFixed + '80',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: Radius.full,
+  },
+  inlineDurationBadgeText: { fontFamily: 'Manrope_700Bold', fontSize: 11, color: Colors.primary },
+  inlineChipRow: { gap: 8, paddingRight: 4 },
+  inlineChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: Radius.full,
+    borderWidth: 1.5,
+    borderColor: Colors.outlineVariant + '70',
+    backgroundColor: Colors.surfaceContainerLowest,
+  },
+  inlineChipSelected: {
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.22,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  inlineChipText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, color: Colors.onSurfaceVariant },
+  inlineChipTextSelected: { color: Colors.onPrimary },
+  inlineConfirmBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: Colors.primary,
+    paddingVertical: 15,
+    borderRadius: Radius.xl,
+    marginTop: 2,
+    ...Shadow.button,
+  },
+  inlineConfirmBtnDisabled: { opacity: 0.38 },
+  inlineConfirmLabel: { fontFamily: 'Manrope_700Bold', fontSize: 15, color: Colors.onPrimary },
+  inlineConfirmIcon: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: Colors.onPrimary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // Modal sheet (kept for legacy reference)
+  scrim: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
   sheet: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
+    maxHeight: height * 0.88,
     backgroundColor: Colors.background,
     borderTopLeftRadius: 30, borderTopRightRadius: 30,
     paddingHorizontal: Spacing.gutter,
@@ -1116,33 +1388,13 @@ const styles = StyleSheet.create({
   chipText: { fontFamily: 'Manrope_500Medium', color: Colors.onSurface, fontSize: 13 },
   chipTextSelected: { color: Colors.onPrimary, fontFamily: 'Manrope_700Bold' },
   // Premium custom inputs
-  customRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 16, paddingVertical: 16, paddingHorizontal: 20,
-    backgroundColor: Colors.primaryFixed + '35',
-    borderRadius: Radius.xl, borderWidth: 1, borderColor: Colors.primary + '15',
-    marginTop: 4,
+  customBlock: { gap: 6 },
+  customHint: {
+    fontFamily: 'Manrope_500Medium',
+    fontSize: 11,
+    color: Colors.onSurfaceVariant,
+    textAlign: 'center',
   },
-  customUnit: { alignItems: 'center', gap: 6 },
-  customBox: {
-    width: 90, height: 72, borderRadius: Radius.lg,
-    backgroundColor: Colors.surfaceContainerLowest,
-    fontFamily: 'Manrope_800ExtraBold', fontSize: 36,
-    color: Colors.onSurface,
-    borderWidth: 1.5, borderColor: Colors.outlineVariant + '40',
-    paddingVertical: 0,
-  },
-  customBoxActive: {
-    borderColor: Colors.primary,
-    color: Colors.primary,
-    backgroundColor: Colors.primaryFixed + '60',
-    shadowColor: Colors.primary, shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.18, shadowRadius: 8, elevation: 4,
-  },
-  customBoxCursor: { height: 2, width: 40, borderRadius: 1, backgroundColor: 'transparent', marginTop: -2 },
-  customBoxCursorActive: { backgroundColor: Colors.primary },
-  customBoxLabel: { fontFamily: 'Manrope_500Medium', fontSize: 11, color: Colors.outline, textTransform: 'uppercase', letterSpacing: 1.5 },
-  customSeparator: { fontFamily: 'Manrope_800ExtraBold', fontSize: 36, color: Colors.onSurface, opacity: 0.2, marginBottom: 26 },
   // Info card
   infoCard: {
     flexDirection: 'row', gap: 12, alignItems: 'flex-start',
@@ -1209,26 +1461,14 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   previewHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  previewHint: { fontFamily: 'Manrope_400Regular', fontSize: 11, color: Colors.outline, fontStyle: 'italic' },
-  previewBody: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  previewItems: { flex: 1, gap: 8 },
+  previewHint: { fontFamily: 'Manrope_500Medium', fontSize: 12, color: Colors.primary, opacity: 0.7 },
+  previewItems: { gap: 8 },
   previewItem: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  previewItemIcon: {
-    width: 26, height: 26, borderRadius: 7,
-    backgroundColor: Colors.primaryFixed, alignItems: 'center', justifyContent: 'center',
+  previewItemDot: {
+    width: 6, height: 6, borderRadius: 3,
+    backgroundColor: Colors.primary, opacity: 0.5,
   },
-  previewItemText: { fontFamily: 'Manrope_500Medium', fontSize: 13, color: Colors.onSurface },
-  completionRing: {
-    width: RING_SIZE, height: RING_SIZE,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  completionGlow: {
-    position: 'absolute',
-    width: RING_SIZE + 16, height: RING_SIZE + 16,
-    borderRadius: (RING_SIZE + 16) / 2,
-    borderWidth: 8, borderColor: Colors.primary,
-  },
-  completionRingInner: { alignItems: 'center', gap: 1, zIndex: 2 },
-  completionPct: { fontFamily: 'Manrope_800ExtraBold', fontSize: 17, color: Colors.primary, lineHeight: 21 },
-  completionLabel: { fontFamily: 'Manrope_400Regular', fontSize: 8, color: Colors.outline, textTransform: 'uppercase', letterSpacing: 0.5 },
+  previewItemText: { flex: 1, fontFamily: 'Manrope_500Medium', fontSize: 13, color: Colors.onSurface },
+  previewItemDuration: { fontFamily: 'Manrope_400Regular', fontSize: 12, color: Colors.onSurfaceVariant },
+  previewMore: { fontFamily: 'Manrope_400Regular', fontSize: 12, color: Colors.outline, marginLeft: 14 },
 });

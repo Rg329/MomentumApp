@@ -70,7 +70,9 @@ function buildCoachingDirectives(
     directives.push('Protect peak focus windows; minimize context switching.');
   }
 
-  directives.push(`Best focus period signal: ${insights.bestFocusPeriod}.`);
+  if (insights.bestFocusPeriod && insights.bestFocusPeriod !== 'Unknown') {
+    directives.push(`Best focus period signal: ${insights.bestFocusPeriod}.`);
+  }
 
   for (const pattern of insights.procrastinationPatterns.filter((p) => p.severity !== 'low').slice(0, 2)) {
     directives.push(`Counter pattern "${pattern.label}": ${pattern.description}`);

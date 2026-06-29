@@ -153,12 +153,27 @@ export function AIAnalysisScreen({ navigation }: Props) {
     if (index >= AI_STEPS.length) {
       setIsDone(true);
       const { tasks } = useAppStore.getState();
-      if (tasks.length > 0) {
-        buildAndSaveUserSchedule();
-      } else {
-        useAppStore.setState({ scheduleBlocks: [] });
-      }
-      setTimeout(() => navigation.replace('OverloadAlert'), 1000);
+      setTimeout(async () => {
+        if (tasks.length > 0) {
+          const result = await buildAndSaveUserSchedule();
+          if (result.droppedTasks.length > 0) {
+            navigation.replace('OverloadAlert', {
+              droppedTasks: result.droppedTasks,
+              scheduledCount: result.blocks.length,
+            });
+          } else {
+            const { isPremium, hasSeenProOffer } = useAppStore.getState();
+            if (!isPremium && !hasSeenProOffer) {
+              navigation.replace('ProOffer');
+            } else {
+              navigation.replace('MainTabs', { screen: 'Schedule' });
+            }
+          }
+        } else {
+          useAppStore.setState({ scheduleBlocks: [] });
+          navigation.replace('MainTabs');
+        }
+      }, 1000);
       return;
     }
     setStepIndex(index);

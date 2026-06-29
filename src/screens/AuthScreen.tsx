@@ -149,6 +149,9 @@ export function AuthScreen({ navigation }: Props) {
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.blob1} />
       <View style={styles.blob2} />
+      <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.7} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+        <MaterialCommunityIcons name="chevron-left" size={24} color={Colors.onSurface} />
+      </TouchableOpacity>
 
       <ScrollView
         contentContainerStyle={styles.content}
@@ -255,7 +258,7 @@ export function AuthScreen({ navigation }: Props) {
 
         <TouchableOpacity
           style={styles.secondary}
-          onPress={() => navigation.replace('ProOffer')}
+          onPress={() => navigation.replace('MainTabs', { screen: 'Schedule' })}
           disabled={loading}
           activeOpacity={0.85}
         >
@@ -268,6 +271,18 @@ export function AuthScreen({ navigation }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
+  backBtn: {
+    position: 'absolute',
+    top: 56,
+    left: 16,
+    zIndex: 10,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: Colors.surfaceContainerHigh,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   blob1: {
     position: 'absolute',
     top: -90,

@@ -7,7 +7,28 @@ export const INSUFFICIENT_DATA_MESSAGE =
   "I'm still learning your patterns. Complete more tasks so I can provide personalized coaching.";
 
 /** Minimum completed focus sessions before personalized coaching kicks in. */
-export const MIN_COMPLETED_FOR_COACHING = 2;
+export const MIN_COMPLETED_FOR_COACHING = 1;
+
+export const DAY1_OBSERVATION: Record<string, string> = {
+  overwhelmed_tasks:  "You've told me large tasks feel overwhelming — so I'll keep your blocks small and your list short.",
+  waiting_motivation: "You tend to wait for motivation before starting. I'll front-load your day with quick wins to build momentum.",
+  dont_know_start:    "When tasks feel ambiguous you stall. I'll make sure every block has a clear first action.",
+  easily_distracted:  "Distractions pull you off track. I'll protect your peak focus window and keep context-switching low.",
+  changing_plans:     "You told me you often change your plans. I'll lock in a minimal schedule first, then we can refine it.",
+  underestimate_time: "You tend to underestimate how long tasks take. I've added buffers so you're not racing the clock.",
+};
+
+export const DAY1_ACTION: Record<string, string> = {
+  overwhelmed_tasks:  "Start with the first block on your schedule — it's already sized for you.",
+  waiting_motivation: "Don't wait to feel ready. Open your first task right now and set a 10-minute timer.",
+  dont_know_start:    "Pick the top task on your schedule and write down the first physical action in one sentence.",
+  easily_distracted:  "Put your phone face-down and close everything except this session before you start.",
+  changing_plans:     "Commit to today's schedule as built. Note any changes you want — but don't act on them until the session ends.",
+  underestimate_time: "Your first block is time-boxed. Stop when the timer ends, not when the task feels done.",
+};
+
+export const DAY1_FALLBACK_OBSERVATION = "You've set up your first schedule. Let's see how today goes.";
+export const DAY1_FALLBACK_ACTION      = "Start your first focus block now — that's how I learn what works for you.";
 
 export const PATTERN_PLAIN: Record<string, string> = {
   high_skip_rate: 'You often put tasks off instead of finishing them.',

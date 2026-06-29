@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   ScrollView,
   Animated,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -19,13 +20,34 @@ import { CoachingCard, PremiumCoachingCard } from '../components/CoachingCard';
 import { usePremium, PREMIUM_COLOR } from '../monetization';
 import { useAppStore } from '../store/useAppStore';
 import { useBehavioralCoach, generateCoachingMessage } from '../coaching';
+import { LinearGradient } from 'expo-linear-gradient';
 
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
 
 // ─── Locked premium section ────────────────────────────────────────────────────
 function LockedSection({
-  icon, title, description, onUnlock,
-}: { icon: IconName; title: string; description: string; onUnlock: () => void }) {
+  icon, title, description, preview, onUnlock,
+}: { icon: IconName; title: string; description: string; preview?: string; onUnlock: () => void }) {
+  if (preview) {
+    const truncated = preview.length > 100 ? `${preview.slice(0, 100)}...` : preview;
+    return (
+      <TouchableOpacity style={lockedStyles.card} onPress={onUnlock} activeOpacity={0.88}>
+        <View style={lockedStyles.proCorner}>
+          <PremiumBadge size="sm" />
+        </View>
+        <View style={lockedStyles.previewWrap}>
+          <Text style={lockedStyles.previewText}>{truncated}</Text>
+          <LinearGradient
+            colors={['transparent', Colors.surfaceContainerLowest]}
+            style={lockedStyles.previewFade}
+            pointerEvents="none"
+          />
+        </View>
+        <Text style={lockedStyles.previewUnlock}>Unlock full analysis →</Text>
+      </TouchableOpacity>
+    );
+  }
+
   return (
     <TouchableOpacity style={lockedStyles.card} onPress={onUnlock} activeOpacity={0.88}>
       <View style={lockedStyles.blur}>
@@ -73,6 +95,10 @@ const lockedStyles = StyleSheet.create({
   iconRing: { width: 44, height: 44, borderRadius: 22, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center', backgroundColor: PREMIUM_COLOR + '0c' },
   title:     { fontFamily: 'Manrope_700Bold', fontSize: 15, color: Colors.onSurface },
   desc:      { fontFamily: 'Manrope_400Regular', fontSize: 12, color: Colors.onSurfaceVariant, textAlign: 'center', maxWidth: 240 },
+  previewWrap: { flex: 1, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8, overflow: 'hidden' },
+  previewText: { fontFamily: 'Manrope_400Regular', fontSize: 13, color: Colors.onSurfaceVariant, lineHeight: 20 },
+  previewFade: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 40 },
+  previewUnlock: { fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: PREMIUM_COLOR, paddingHorizontal: 16, paddingBottom: 14 },
 });
 
 // ─── Premium upgrade banner ────────────────────────────────────────────────────
@@ -124,6 +150,16 @@ export function DailySummaryScreen() {
   const { completeDailyReview } = useAppStore();
   const coach = useBehavioralCoach('daily_summary');
 
+  const deepAnalysisPreview: string | undefined =
+    coach.context && !pm.canUse('deep_insights')
+      ? generateCoachingMessage('deep_analysis', coach.context, undefined, false).observation
+      : undefined;
+
+  const weeklyReportPreview: string | undefined =
+    coach.context && !pm.canUse('weekly_reflections')
+      ? generateCoachingMessage('weekly_report', coach.context, undefined, false).observation
+      : undefined;
+
   const deepAnalysis = coach.context && pm.canUse('deep_insights')
     ? generateCoachingMessage('deep_analysis', coach.context, undefined, true)
     : null;
@@ -158,11 +194,33 @@ export function DailySummaryScreen() {
 
   const handleComplete = () => {
     completeDailyReview();
+
+    const today = new Date().toISOString().split('T')[0];
+    const { account, lastAuthPromptDate, setLastAuthPromptDate } = useAppStore.getState();
+    const alreadySignedIn = Boolean(account.email);
+    const alreadyPrompted = lastAuthPromptDate === today;
+
+    const navigateAfterReview = () => {
+      if (!alreadySignedIn && !alreadyPrompted) {
+        setLastAuthPromptDate(today);
+        Alert.alert(
+          'Save your insights',
+          'Sign in to back up your progress and access it on any device.',
+          [
+            { text: 'Not now', style: 'cancel', onPress: () => navigation.navigate('Schedule' as any) },
+            { text: 'Sign In', onPress: () => navigation.navigate('Auth') },
+          ],
+        );
+      } else {
+        navigation.navigate('Schedule' as any);
+      }
+    };
+
     Animated.sequence([
       Animated.timing(toastOpacity, { toValue: 1, duration: 220, useNativeDriver: true }),
       Animated.delay(900),
       Animated.timing(toastOpacity, { toValue: 0, duration: 220, useNativeDriver: true }),
-    ]).start(() => navigation.navigate('Schedule' as any));
+    ]).start(navigateAfterReview);
   };
 
   return (
@@ -221,6 +279,11 @@ export function DailySummaryScreen() {
               <Text style={styles.scoreMetricLabel}>Skipped</Text>
               <Text style={styles.scoreMetricValue}>{coach.analytics?.tasksSkipped ?? 0}</Text>
             </View>
+            <View style={styles.scoreMetric}>
+              <MaterialCommunityIcons name="fire" size={18} color={Colors.tertiary} />
+              <Text style={styles.scoreMetricLabel}>Day Streak</Text>
+              <Text style={styles.scoreMetricValue}>{coach.analytics?.currentStreak ?? 0}</Text>
+            </View>
           </View>
           <View style={styles.scoreAura} />
         </View>
@@ -270,6 +333,7 @@ export function DailySummaryScreen() {
             icon="chart-areaspline"
             title="Deep Procrastination Analysis"
             description="Multi-pattern analysis with evidence from your task event history."
+            preview={deepAnalysisPreview}
             onUnlock={() => navigation.navigate('Premium')}
           />
         )}
@@ -297,6 +361,7 @@ export function DailySummaryScreen() {
             icon="text-box-check-outline"
             title="Weekly Coaching Reports"
             description="Observation → pattern → action report from your 7-day trends."
+            preview={weeklyReportPreview}
             onUnlock={() => navigation.navigate('Premium')}
           />
         )}
@@ -313,7 +378,6 @@ export function DailySummaryScreen() {
             )}
             <View style={styles.analyticsRow}>
               {[
-                { icon: 'fire' as IconName, label: 'Day Streak', val: String(coach.analytics?.currentStreak ?? 0) },
                 { icon: 'trophy-outline' as IconName, label: 'Best Streak', val: String(coach.analytics?.bestStreak ?? 0) },
                 { icon: 'percent' as IconName, label: 'Completion', val: `${coach.analytics?.completionRatePct ?? 0}%` },
               ].map((item) => (

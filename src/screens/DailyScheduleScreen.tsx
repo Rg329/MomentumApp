@@ -1,10 +1,11 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -17,6 +18,8 @@ import { useBehavioralCoach } from '../coaching';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/RootNavigator';
+import { usePremium } from '../monetization';
+import { FREE_GENERATION_LIMIT } from '../monetization/features';
 
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
 
@@ -128,12 +131,58 @@ function TimeBlockItem({ block, onPress }: { block: ScheduleBlock; onPress: () =
 export function DailyScheduleScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const p   = usePersonalization();
-  const { scheduleBlocks, tasks } = useAppStore();
+  const pm  = usePremium();
+  const { scheduleBlocks, tasks, completedTaskIds, clearDayData, removeTask, dailyGenerations, lastGenerationDate, incrementGeneration } = useAppStore();
+  const scheduleDate = useAppStore((s) => s.scheduleDate);
+
+  const today = new Date().toISOString().split('T')[0];
+  const todayGenerations = lastGenerationDate === today ? dailyGenerations : 0;
+  const canRegenerate = pm.isPremium || todayGenerations < FREE_GENERATION_LIMIT;
+
+  const handleRegenerate = () => {
+    if (!canRegenerate) {
+      navigation.navigate('Premium');
+      return;
+    }
+    incrementGeneration();
+    navigation.navigate('Constraints');
+  };
   const scheduleCoach = useBehavioralCoach('schedule_banner');
-  const now = nowMinutes();
+  const [now, setNow] = useState(nowMinutes());
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(nowMinutes()), 60_000);
+    return () => clearInterval(interval);
+  }, []);
 
   const blocks = scheduleBlocks;
   const hasUserTasks = tasks.length > 0;
+
+  const scheduleIsStale = scheduleDate !== null && scheduleDate !== today && blocks.length > 0;
+  const [showRollover, setShowRollover] = useState(false);
+
+  useEffect(() => {
+    if (scheduleIsStale) setShowRollover(true);
+  }, [scheduleIsStale]);
+
+  const handleStartFresh = () => {
+    setShowRollover(false);
+    clearDayData();
+    tasks.forEach((t) => removeTask(t.id));
+    navigation.navigate('BrainDump');
+  };
+
+  const handleCarryOver = () => {
+    setShowRollover(false);
+    const completedBlockTitles = blocks
+      .filter((b) => completedTaskIds.includes(b.id))
+      .map((b) => b.title);
+    tasks
+      .filter((t) => completedBlockTitles.some((title) => title === t.text))
+      .forEach((t) => removeTask(t.id));
+    clearDayData();
+    navigation.navigate('BrainDump');
+  };
 
   const nowIndex = useMemo(() => {
     for (let i = 0; i < blocks.length; i++) {
@@ -182,12 +231,18 @@ export function DailyScheduleScreen() {
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={styles.regenBtn}
+              style={[styles.regenBtn, !canRegenerate && styles.regenBtnLocked]}
               activeOpacity={0.85}
-              onPress={() => navigation.navigate('AIAnalysis')}
+              onPress={handleRegenerate}
             >
-              <MaterialCommunityIcons name="star-four-points" size={12} color={Colors.onPrimary} />
-              <Text style={styles.regenBtnLabel}>Regenerate</Text>
+              <MaterialCommunityIcons
+                name={canRegenerate ? 'star-four-points' : 'lock-outline'}
+                size={12}
+                color={Colors.onPrimary}
+              />
+              <Text style={styles.regenBtnLabel}>
+                {canRegenerate ? 'Regenerate' : 'Regenerate · Pro'}
+              </Text>
             </TouchableOpacity>
           </View>
 
@@ -252,10 +307,35 @@ export function DailyScheduleScreen() {
       <TouchableOpacity
         style={styles.fab}
         activeOpacity={0.85}
-        onPress={() => navigation.navigate('BrainDump')}
+        onPress={() => navigation.navigate('MainTabs', { screen: 'Focus' })}
       >
         <MaterialCommunityIcons name="plus" size={26} color={Colors.onPrimary} />
       </TouchableOpacity>
+
+      {/* ── Day Rollover Modal ── */}
+      <Modal visible={showRollover} transparent animationType="fade">
+        <View style={rolloverStyles.overlay}>
+          <View style={rolloverStyles.card}>
+            <View style={rolloverStyles.iconWrap}>
+              <Text style={rolloverStyles.emoji}>🌅</Text>
+            </View>
+            <Text style={rolloverStyles.title}>New day ahead</Text>
+            <Text style={rolloverStyles.subtitle}>
+              Your yesterday's schedule is still here. What would you like to do?
+            </Text>
+
+            <TouchableOpacity style={rolloverStyles.primaryBtn} onPress={handleCarryOver} activeOpacity={0.88}>
+              <MaterialCommunityIcons name="arrow-right-circle" size={18} color="#fff" />
+              <Text style={rolloverStyles.primaryBtnText}>Carry over unfinished tasks</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={rolloverStyles.secondaryBtn} onPress={handleStartFresh} activeOpacity={0.88}>
+              <MaterialCommunityIcons name="refresh" size={16} color={Colors.primary} />
+              <Text style={rolloverStyles.secondaryBtnText}>Start completely fresh</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -271,6 +351,91 @@ function NowIndicator() {
     </View>
   );
 }
+
+const rolloverStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'flex-end',
+    padding: Spacing.gutter,
+    paddingBottom: 36,
+  },
+  card: {
+    backgroundColor: Colors.surfaceContainerLowest,
+    borderRadius: 28,
+    padding: 28,
+    gap: 12,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 20 },
+    shadowOpacity: 0.18,
+    shadowRadius: 40,
+    elevation: 20,
+  },
+  iconWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: Colors.primaryFixed,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  emoji: { fontSize: 34 },
+  title: {
+    fontFamily: 'Manrope_800ExtraBold',
+    fontSize: 22,
+    color: Colors.onSurface,
+    textAlign: 'center',
+    letterSpacing: -0.4,
+  },
+  subtitle: {
+    fontFamily: 'Manrope_400Regular',
+    fontSize: 14,
+    color: Colors.onSurfaceVariant,
+    textAlign: 'center',
+    lineHeight: 21,
+    maxWidth: 280,
+    marginBottom: 8,
+  },
+  primaryBtn: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: Colors.primary,
+    borderRadius: Radius.xl,
+    paddingVertical: 16,
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.28,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  primaryBtnText: {
+    fontFamily: 'Manrope_700Bold',
+    fontSize: 15,
+    color: '#fff',
+  },
+  secondaryBtn: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: Colors.primaryFixed,
+    borderRadius: Radius.xl,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: Colors.primary + '25',
+  },
+  secondaryBtnText: {
+    fontFamily: 'Manrope_600SemiBold',
+    fontSize: 14,
+    color: Colors.primary,
+  },
+});
 
 const styles = StyleSheet.create({
   container: {
@@ -410,6 +575,11 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     elevation: 5,
     minWidth: 132,
+  },
+  regenBtnLocked: {
+    backgroundColor: Colors.outline,
+    shadowOpacity: 0,
+    elevation: 0,
   },
   regenBtnLabel: {
     ...Typography.labelSm,

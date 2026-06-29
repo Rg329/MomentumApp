@@ -1,6 +1,6 @@
 import type { FeatureDef, FeatureId, PricingPlan } from './types';
 
-export const FREE_GENERATION_LIMIT = 3;
+export const FREE_GENERATION_LIMIT = 1;
 
 // Premium accent color — distinct from app's primary blue
 export const PREMIUM_COLOR = '#6366f1'; // indigo-500

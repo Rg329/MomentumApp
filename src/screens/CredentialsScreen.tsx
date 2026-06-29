@@ -39,12 +39,12 @@ export function CredentialsScreen({ navigation }: Props) {
       createdAt: account.createdAt ?? new Date().toISOString(),
     });
     syncOnboardingProfileToSupabase();
-    navigation.replace('ProOffer');
+    navigation.replace('MainTabs', { screen: 'Schedule' });
   };
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <TopBar rightContent={<View style={styles.avatar} />} />
+      <TopBar onBack={() => navigation.goBack()} />
 
       <View style={styles.blob1} />
       <View style={styles.blob2} />
@@ -108,7 +108,7 @@ export function CredentialsScreen({ navigation }: Props) {
 
         <TouchableOpacity
           style={styles.skip}
-          onPress={() => navigation.replace('ProOffer')}
+          onPress={() => navigation.replace('MainTabs', { screen: 'Focus' })}
           activeOpacity={0.85}
         >
           <Text style={styles.skipLabel}>Skip for now</Text>

@@ -4,7 +4,7 @@ import { MIN_COMPLETED_FOR_COACHING } from './humanCopy';
 /** Enough real usage to personalize — not onboarding answers. */
 export function hasEnoughBehavioralData(ctx: CoachingContext): boolean {
   return (
-    ctx.metrics.tasksCompleted >= MIN_COMPLETED_FOR_COACHING
+    ctx.metrics.tasksCompleted >= 1
     || (ctx.metrics.tasksCompleted >= 1 && ctx.metrics.tasksStarted >= 2)
     || ctx.metrics.tasksSkipped >= 2
     || ctx.metrics.tasksRescheduled >= 3

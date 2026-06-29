@@ -22,7 +22,10 @@ export type RootStackParamList = {
   BrainDump:    undefined;
   Constraints:  undefined;
   AIAnalysis:   undefined;
-  OverloadAlert:undefined;
+  OverloadAlert: {
+    droppedTasks: Array<{ title: string; durationMinutes: number }>;
+    scheduledCount: number;
+  };
   FocusMode:    { taskId?: string; taskTitle?: string; taskDesc?: string; durationMinutes?: number; scheduledTime?: string } | undefined;
   Premium:      undefined;
   MainTabs:     { screen?: 'Focus' | 'Schedule' | 'Insights' | 'Settings' } | undefined;

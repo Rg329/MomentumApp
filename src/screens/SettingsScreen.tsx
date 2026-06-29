@@ -9,10 +9,12 @@ import {
   Easing,
   Modal,
   Switch,
+  Alert,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, CommonActions } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/RootNavigator';
 import { Colors, Typography, Spacing, Radius, Shadow } from '../theme';
@@ -251,6 +253,7 @@ export function SettingsScreen() {
     setOnboardingData,
     setWakeTime,
     setPreferences,
+    resetStore,
   } = useAppStore();
   const pm = usePremium();
   const isPremium = pm.isPremium;
@@ -279,6 +282,27 @@ export function SettingsScreen() {
 
   const goToInsights = () => {
     navigation.navigate('MainTabs', { screen: 'Insights' });
+  };
+
+  const handleDevReset = () => {
+    Alert.alert(
+      'Reset App',
+      'This clears all data and takes you back to the first-launch screen. Use for testing only.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reset',
+          style: 'destructive',
+          onPress: async () => {
+            resetStore();
+            await AsyncStorage.clear();
+            navigation.dispatch(
+              CommonActions.reset({ index: 0, routes: [{ name: 'Splash' }] })
+            );
+          },
+        },
+      ],
+    );
   };
 
   const SECTIONS: SettingSection[] = [
@@ -579,6 +603,13 @@ export function SettingsScreen() {
           </View>
         )}
 
+        {__DEV__ && (
+          <TouchableOpacity style={styles.devReset} onPress={handleDevReset} activeOpacity={0.7}>
+            <MaterialCommunityIcons name="refresh" size={14} color="#cc3333" />
+            <Text style={styles.devResetText}>Reset App (Dev Only)</Text>
+          </TouchableOpacity>
+        )}
+
         <Text style={styles.versionText}>Momentum v1.0.0 · Calculated Calm</Text>
       </ScrollView>
 
@@ -670,6 +701,22 @@ const styles = StyleSheet.create({
     borderRadius: Radius.lg, paddingHorizontal: 14, paddingVertical: 10,
   },
   genCounterText: { fontFamily: 'Manrope_400Regular', fontSize: 12, color: Colors.outline },
+  devReset: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: '#cc333330',
+    backgroundColor: '#cc333308',
+  },
+  devResetText: {
+    fontFamily: 'Manrope_600SemiBold',
+    fontSize: 12,
+    color: '#cc3333',
+  },
   versionText: {
     ...Typography.labelXs,
     color: Colors.outline,

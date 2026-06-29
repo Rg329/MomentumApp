@@ -9,6 +9,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/RootNavigator';
 import { Colors, Typography, Spacing, Radius, Shadow } from '../theme';
 import { TopBar } from '../components/TopBar';
+import { useAppStore } from '../store/useAppStore';
 
 type Props    = NativeStackScreenProps<RootStackParamList, 'OverloadAlert'>;
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
@@ -123,13 +124,34 @@ const burnStyles = StyleSheet.create({
   fill:  { height: '100%', borderRadius: 3 },
 });
 
+function formatDuration(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return `${m} minute${m !== 1 ? 's' : ''}`;
+  if (m === 0) return `${h} hour${h !== 1 ? 's' : ''}`;
+  return `${h} hour${h !== 1 ? 's' : ''} ${m} minute${m !== 1 ? 's' : ''}`;
+}
+
+function formatDurationShort(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return `${m}m`;
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
+}
+
 // ─── Main Screen ──────────────────────────────────────────────────────────────
-export function OverloadAlertScreen({ navigation }: Props) {
-  const go = () => navigation.navigate('MainTabs');
+export function OverloadAlertScreen({ navigation, route }: Props) {
+  const { droppedTasks, scheduledCount } = route.params;
+  const { tasks, removeTask } = useAppStore();
+  const droppedCount = droppedTasks.length;
+  const droppedMinutes = droppedTasks.reduce((sum, t) => sum + t.durationMinutes, 0);
+  const totalUnits = droppedCount + scheduledCount;
+  const overloadPct = totalUnits > 0 ? Math.round((droppedCount / totalUnits) * 100) : 0;
+  const sustainPct = Math.max(0, 100 - overloadPct);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <TopBar />
+      <TopBar onBack={() => navigation.goBack()} />
 
       {/* Ambient blobs */}
       <View style={styles.blob1} pointerEvents="none" />
@@ -167,15 +189,21 @@ export function OverloadAlertScreen({ navigation }: Props) {
             </View>
 
             <Text style={styles.alertDesc}>
-              Your workload exceeds today's realistic capacity by{' '}
-              <Text style={styles.alertHighlight}>1 hour 45 minutes</Text>. Based on your focus trends,
-              cognitive fatigue may set in around <Text style={styles.alertHighlight}>4:00 PM</Text>.
+              Your day couldn't fit{' '}
+              <Text style={styles.alertHighlight}>
+                {droppedCount} task{droppedCount !== 1 ? 's' : ''}
+              </Text>
+              {' '}—{' '}
+              <Text style={styles.alertHighlight}>{formatDuration(droppedMinutes)}</Text>
+              {' '}didn't make it onto today's schedule.{' '}
+              <Text style={styles.alertHighlight}>{scheduledCount}</Text>
+              {' '}block{scheduledCount !== 1 ? 's' : ''} were scheduled.
             </Text>
 
             {/* Stats */}
             <View style={styles.statsRow}>
-              <StatChip icon="gauge-full"    label="Density Level"  value="118% — High" accent />
-              <StatChip icon="battery-alert" label="Focus Reserve"  value="Critical Low" accent />
+              <StatChip icon="gauge-full"    label="Tasks Dropped"  value={`${droppedCount}`} accent />
+              <StatChip icon="battery-alert" label="Time Overflow"  value={formatDurationShort(droppedMinutes)} accent />
             </View>
 
             {/* Divider */}
@@ -183,29 +211,39 @@ export function OverloadAlertScreen({ navigation }: Props) {
 
             {/* Actions */}
             <View style={styles.actionsCol}>
-              <ActionBtn label="Simplify My Day"    icon="tune-variant"      variant="primary"   onPress={go} />
-              <ActionBtn label="Optimise Harder"    icon="lightning-bolt"    variant="secondary" onPress={go} />
-              <ActionBtn label="Keep Original Plan" icon="check"             variant="ghost"     onPress={go} />
+              <ActionBtn label="Remove dropped tasks and continue" icon="tune-variant"   variant="primary"   onPress={() => {
+                droppedTasks.forEach((dropped) => {
+                  const match = tasks.find(
+                    (t) => t.text === dropped.title || dropped.title.startsWith(t.text)
+                  );
+                  if (match) removeTask(match.id);
+                });
+                navigation.navigate('MainTabs', { screen: 'Schedule' });
+              }} />
+              <ActionBtn label="Go back and edit tasks"            icon="pencil-outline" variant="secondary" onPress={() => navigation.navigate('MainTabs', { screen: 'Focus' })} />
+              <ActionBtn label="Continue with full list"           icon="check"          variant="ghost"     onPress={() => navigation.navigate('MainTabs', { screen: 'Schedule' })} />
             </View>
           </View>
         </EntryCard>
 
-        {/* ── Conflict card ── */}
+        {/* ── Dropped tasks card ── */}
         <EntryCard delay={200}>
           <View style={styles.conflictCard}>
             <View style={styles.conflictBadgeRow}>
-              <MaterialCommunityIcons name="swap-horizontal" size={12} color={Colors.primary} />
-              <Text style={styles.conflictBadgeText}>Top Conflict</Text>
+              <MaterialCommunityIcons name="format-list-bulleted" size={12} color={Colors.primary} />
+              <Text style={styles.conflictBadgeText}>Dropped Tasks</Text>
             </View>
-            <Text style={styles.conflictTitle}>Deep Work vs. Sync Meeting</Text>
-            <Text style={styles.conflictDesc}>
-              Momentum suggests moving 'Maths Mock Test' to Thursday morning where you have a 3-hour
-              focus block available.
+            <Text style={styles.conflictTitle}>
+              {droppedCount} task{droppedCount !== 1 ? 's' : ''} couldn't fit today
             </Text>
-            <TouchableOpacity style={styles.reviewBtn} activeOpacity={0.75}>
-              <Text style={styles.reviewBtnLabel}>Review Reschedule</Text>
-              <MaterialCommunityIcons name="arrow-right" size={14} color={Colors.primary} />
-            </TouchableOpacity>
+            <View style={styles.droppedList}>
+              {droppedTasks.map((task, index) => (
+                <View key={`${task.title}-${index}`} style={styles.droppedRow}>
+                  <Text style={styles.droppedTitle} numberOfLines={2}>{task.title}</Text>
+                  <Text style={styles.droppedDuration}>{formatDurationShort(task.durationMinutes)}</Text>
+                </View>
+              ))}
+            </View>
           </View>
         </EntryCard>
 
@@ -220,11 +258,13 @@ export function OverloadAlertScreen({ navigation }: Props) {
                 <Text style={styles.sustainTitle}>Sustainability Score</Text>
                 <Text style={styles.sustainSub}>Based on your current pace</Text>
               </View>
-              <Text style={styles.sustainPct}>64%</Text>
+              <Text style={styles.sustainPct}>{sustainPct}%</Text>
             </View>
-            <BurnoutBar pct={64} />
+            <BurnoutBar pct={sustainPct} />
             <Text style={styles.sustainNote}>
-              Maintaining this pace for 3+ days increases burnout risk significantly. Consider adding a buffer block tomorrow.
+              {scheduledCount} block{scheduledCount !== 1 ? 's' : ''} fit today, but{' '}
+              {formatDuration(droppedMinutes)} of work was left off the schedule.
+              Consider trimming your list or moving tasks to another day.
             </Text>
           </View>
         </EntryCard>
@@ -271,8 +311,10 @@ const styles = StyleSheet.create({
   conflictBadgeText: { fontFamily: 'Manrope_600SemiBold', fontSize: 10, color: Colors.primary, letterSpacing: 0.4 },
   conflictTitle:     { fontFamily: 'Manrope_700Bold', fontSize: 16, color: Colors.onSurface, letterSpacing: -0.2 },
   conflictDesc:      { ...Typography.bodyMd, color: Colors.onSurfaceVariant, lineHeight: 21 },
-  reviewBtn:         { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', backgroundColor: Colors.primaryFixed, paddingHorizontal: 12, paddingVertical: 8, borderRadius: Radius.lg, borderWidth: 1, borderColor: Colors.primary + '25' },
-  reviewBtnLabel:    { fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: Colors.primary },
+  droppedList:       { gap: 8 },
+  droppedRow:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, backgroundColor: Colors.surfaceContainerLow, borderRadius: Radius.lg, paddingHorizontal: 14, paddingVertical: 12, borderWidth: 1, borderColor: Colors.outlineVariant + '25' },
+  droppedTitle:      { flex: 1, fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: Colors.onSurface },
+  droppedDuration:   { fontFamily: 'Manrope_700Bold', fontSize: 13, color: Colors.primary },
 
   // Sustainability card
   sustainCard:    { backgroundColor: Colors.surfaceContainerLowest, borderRadius: Radius.xl, padding: 18, gap: 12, ...Shadow.card, borderWidth: 1, borderColor: '#ef444420' },

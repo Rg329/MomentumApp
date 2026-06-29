@@ -10,7 +10,11 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList }    from '../navigation/RootNavigator';
 import { Colors, Typography, Spacing, Radius } from '../theme';
 import { TopBar }       from '../components/TopBar';
-import { MOCK_CONSTRAINTS, MOCK_DEADLINES, Constraint, DeadlineTask } from '../data/mockData';
+import { Constraint, DeadlineTask, useAppStore } from '../store/useAppStore';
+import { MOCK_CONSTRAINTS, MOCK_DEADLINES } from '../data/mockData';
+import { usePremium } from '../monetization';
+
+const FREE_CONSTRAINTS_LIMIT = 3;
 
 type Props     = NativeStackScreenProps<RootStackParamList, 'Constraints'>;
 type IconName  = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
@@ -54,8 +58,6 @@ function SectionHeader({ icon, title, num, right }: {
     </View>
   );
 }
-
-let nextId = 10;
 
 // ─── Drum-roll time picker ────────────────────────────────────────────────────
 const HOURS         = ['1','2','3','4','5','6','7','8','9','10','11','12'];
@@ -297,14 +299,23 @@ const addDlStyles = StyleSheet.create({
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
 export function ConstraintsScreen({ navigation }: Props) {
-  const [commitments, setCommitments]       = useState(MOCK_CONSTRAINTS);
+  const storedConstraints = useAppStore((s) => s.constraints);
+  const storedDeadlines   = useAppStore((s) => s.deadlines);
+  const { setConstraints, setDeadlines } = useAppStore();
+  const pm = usePremium();
+
+  const [commitments, setCommitments]       = useState<Constraint[]>(
+    storedConstraints.length > 0 ? storedConstraints : MOCK_CONSTRAINTS
+  );
   const [showModal, setShowModal]           = useState(false);
   const [newTitle,  setNewTitle]            = useState('');
   const [newStart,  setNewStart]            = useState('');
   const [newEnd,    setNewEnd]              = useState('');
 
   // Deadlines state
-  const [deadlines, setDeadlines]           = useState(MOCK_DEADLINES);
+  const [deadlines, setDeadlinesLocal]      = useState<DeadlineTask[]>(
+    storedDeadlines.length > 0 ? storedDeadlines : MOCK_DEADLINES
+  );
   const [showDeadlineModal, setShowDeadlineModal] = useState(false);
   const [dlTitle, setDlTitle]               = useState('');
   const [dlHour,   setDlHour]               = useState(4);   // "5" = index 4
@@ -325,18 +336,26 @@ export function ConstraintsScreen({ navigation }: Props) {
   }, []);
 
   const removeCommitment = (id: string) =>
-    setCommitments((c) => c.filter((x) => x.id !== id));
+    setCommitments((c) => {
+      const updated = c.filter((x) => x.id !== id);
+      setConstraints(updated);
+      return updated;
+    });
 
   const addCommitment = () => {
     if (!newTitle.trim()) return;
     const entry: Constraint = {
-      id: String(nextId++),
+      id: Date.now().toString(),
       title: newTitle.trim(),
       start: newStart.trim() || '—',
       end:   newEnd.trim()   || '—',
       color: 'primary',
     };
-    setCommitments((c) => [...c, entry]);
+    setCommitments((c) => {
+      const updated = [...c, entry];
+      setConstraints(updated);
+      return updated;
+    });
     setNewTitle(''); setNewStart(''); setNewEnd('');
     setShowModal(false);
   };
@@ -345,17 +364,25 @@ export function ConstraintsScreen({ navigation }: Props) {
     const h = HOURS[dlHour].padStart(2, '0');
     const timeStr = `${h}:${MINUTES[dlMinute]} ${AMPM_OPTIONS[dlAmpm]}`;
     const entry: DeadlineTask = {
-      id:       String(nextId++),
+      id:       Date.now().toString(),
       title:    dlTitle.trim() || 'Untitled Task',
       deadline: `By ${timeStr}`,
     };
-    setDeadlines((d) => [...d, entry]);
+    setDeadlinesLocal((d) => {
+      const updated = [...d, entry];
+      setDeadlines(updated);
+      return updated;
+    });
     setDlTitle('');
     setShowDeadlineModal(false);
   };
 
   const removeDeadline = (id: string) =>
-    setDeadlines((d) => d.filter((x) => x.id !== id));
+    setDeadlinesLocal((d) => {
+      const updated = d.filter((x) => x.id !== id);
+      setDeadlines(updated);
+      return updated;
+    });
 
   const pressIn  = useCallback(() =>
     Animated.spring(btnScale, { toValue: 0.96, useNativeDriver: true, tension: 400, friction: 8 }).start(), []);
@@ -367,7 +394,7 @@ export function ConstraintsScreen({ navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <TopBar />
+      <TopBar onBack={() => navigation.goBack()} onCancel={() => navigation.goBack()} />
 
       {/* Background ambient blobs */}
       <View style={styles.blob1} pointerEvents="none" />
@@ -394,8 +421,21 @@ export function ConstraintsScreen({ navigation }: Props) {
           <SectionHeader
             icon="calendar-clock" title="Fixed Commitments" num={1}
             right={
-              <TouchableOpacity style={styles.addBtn} onPress={() => setShowModal(true)}>
-                <MaterialCommunityIcons name="plus" size={16} color={Colors.primary} />
+              <TouchableOpacity
+                style={styles.addBtn}
+                onPress={() => {
+                  if (!pm.isPremium && commitments.length >= FREE_CONSTRAINTS_LIMIT) {
+                    navigation.navigate('Premium');
+                  } else {
+                    setShowModal(true);
+                  }
+                }}
+              >
+                <MaterialCommunityIcons
+                  name={!pm.isPremium && commitments.length >= FREE_CONSTRAINTS_LIMIT ? 'lock-outline' : 'plus'}
+                  size={16}
+                  color={Colors.primary}
+                />
               </TouchableOpacity>
             }
           />
@@ -463,7 +503,11 @@ export function ConstraintsScreen({ navigation }: Props) {
         <Animated.View style={{ transform: [{ scale: btnScale }], marginTop: 8 }}>
           <TouchableOpacity
             style={styles.primaryBtn}
-            onPress={() => navigation.navigate('AIAnalysis')}
+            onPress={() => {
+              setConstraints(commitments);
+              setDeadlines(deadlines);
+              navigation.navigate('AIAnalysis');
+            }}
             activeOpacity={1}
             onPressIn={pressIn}
             onPressOut={pressOut}

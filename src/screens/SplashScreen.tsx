@@ -13,6 +13,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/RootNavigator';
 import { Colors, Spacing, Radius } from '../theme';
+import { useAppStore } from '../store/useAppStore';
 
 const { width } = Dimensions.get('window');
 
@@ -78,6 +79,21 @@ function FeatureChip({
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
 export function SplashScreen({ navigation }: Props) {
+  const hasOnboarded = useAppStore((s) => s.hasOnboarded);
+
+  // Returning users skip splash — but wait one tick so Zustand finishes
+  // rehydrating from AsyncStorage before we read hasOnboarded.
+  // Without the timeout, a dev-reset that clears AsyncStorage then navigates
+  // here can still see the stale in-memory hasOnboarded=true value.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (useAppStore.getState().hasOnboarded) {
+        navigation.replace('MainTabs');
+      }
+    }, 50);
+    return () => clearTimeout(t);
+  }, [navigation]);
+
   // Entrance anims
   const logoAnim     = useRef(new Animated.Value(0)).current;
   const logoScale    = useRef(new Animated.Value(0.82)).current;
@@ -127,11 +143,6 @@ export function SplashScreen({ navigation }: Props) {
       Animated.timing(btnAnim, { toValue: 1, duration: 500, useNativeDriver: true }),
     ]).start();
 
-    // Continuous logo breathe
-    Animated.loop(Animated.sequence([
-      Animated.timing(breathe, { toValue: 1.045, duration: 2600, useNativeDriver: true, easing: Easing.inOut(Easing.sin) }),
-      Animated.timing(breathe, { toValue: 1,     duration: 2600, useNativeDriver: true, easing: Easing.inOut(Easing.sin) }),
-    ])).start();
   }, []);
 
   const blob1Op = blob1.interpolate({ inputRange: [0, 1], outputRange: [0.55, 0.85] });
@@ -157,24 +168,11 @@ export function SplashScreen({ navigation }: Props) {
       {/* ── Center ── */}
       <View style={styles.center}>
 
-        {/* Logo with radar rings */}
-        <Animated.View style={[styles.logoZone, { opacity: logoAnim, transform: [{ scale: logoScale }] }]}>
-          <RadarRing delay={0}    size={200} />
-          <RadarRing delay={900}  size={200} />
-          <RadarRing delay={1800} size={200} />
-
-          {/* Logo card */}
-          <Animated.View style={[styles.logoCard, { transform: [{ scale: breathe }] }]}>
-            {/* Inner shine */}
-            <View style={styles.logoShine} pointerEvents="none" />
-            <MaterialCommunityIcons name="lightning-bolt" size={44} color={Colors.onPrimary} />
-          </Animated.View>
+        {/* Brand wordmark */}
+        <Animated.View style={[styles.wordmarkWrap, { opacity: logoAnim, transform: [{ scale: logoScale }] }]}>
+          <Text style={styles.title}>Momentum</Text>
+          <Animated.View style={[styles.wordmarkAccent, { opacity: titleAnim }]} />
         </Animated.View>
-
-        {/* Brand name */}
-        <Animated.Text style={[styles.title, { opacity: titleAnim, transform: [{ translateY: titleY }] }]}>
-          Momentum
-        </Animated.Text>
 
         {/* Tagline */}
         <Animated.Text style={[styles.tagline, { opacity: taglineAnim, transform: [{ translateY: taglineY }] }]}>
@@ -259,36 +257,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.gutter, gap: 0,
   },
 
-  // Logo
-  logoZone: {
-    alignItems: 'center', justifyContent: 'center',
-    width: 200, height: 200,
-    marginBottom: 28,
+  // Wordmark
+  wordmarkWrap: {
+    alignItems: 'center',
+    marginBottom: 20,
   },
-  logoCard: {
-    width: 96, height: 96, borderRadius: 26,
+  wordmarkAccent: {
+    width: 40, height: 3, borderRadius: 2,
     backgroundColor: Colors.primary,
-    alignItems: 'center', justifyContent: 'center',
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 16 },
-    shadowOpacity: 0.38,
-    shadowRadius: 32,
-    elevation: 14,
-    overflow: 'hidden',
-  },
-  logoShine: {
-    position: 'absolute', top: -30, left: -20,
-    width: 80, height: 80, borderRadius: 40,
-    backgroundColor: 'rgba(255,255,255,0.14)',
-    transform: [{ rotate: '30deg' }],
+    marginTop: 10,
+    opacity: 0.5,
   },
 
   // Typography
   title: {
     fontFamily: 'Manrope_800ExtraBold',
-    fontSize: 40, lineHeight: 48, letterSpacing: -1.2,
+    fontSize: 52, lineHeight: 60, letterSpacing: -2,
     color: Colors.primary, textAlign: 'center',
-    marginBottom: 10,
   },
   tagline: {
     fontFamily: 'Manrope_500Medium',

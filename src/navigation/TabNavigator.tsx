@@ -1,6 +1,7 @@
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { BrainDumpScreen } from '../screens/BrainDumpScreen';
 import { DailyScheduleScreen } from '../screens/DailyScheduleScreen';
@@ -20,9 +21,15 @@ const TABS: { name: TabKey; label: string; icon: IconName; iconActive: IconName 
   { name: 'Settings', label: 'Settings', icon: 'cog-outline',           iconActive: 'cog' },
 ];
 
-function CustomTabBar({ state, navigation }: any) {
+function CustomTabBar({ state, navigation, style }: any) {
+  const insets = useSafeAreaInsets();
+
+  if ((style as { display?: string } | undefined)?.display === 'none') {
+    return null;
+  }
+
   return (
-    <View style={styles.tabBar}>
+    <View style={[styles.tabBar, { paddingBottom: Math.max(insets.bottom, 12) }, style]}>
       {state.routes.map((route: any, index: number) => {
         const isFocused = state.index === index;
         const tab = TABS.find((t) => t.name === route.name);
@@ -72,7 +79,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(250,248,255,0.97)',
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: Colors.outlineVariant + '25',
-    paddingBottom: 30,
     paddingTop: 10,
     paddingHorizontal: Spacing.gutter,
     shadowColor: '#000',

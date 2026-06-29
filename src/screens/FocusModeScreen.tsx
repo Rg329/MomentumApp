@@ -11,6 +11,8 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  AppState,
+  AppStateStatus,
 } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -75,17 +77,23 @@ export function FocusModeScreen({ navigation, route }: Props) {
     scheduledTime,
   } = route.params ?? {};
 
-  const { rescheduleScheduleBlock } = useAppStore();
+  const { rescheduleScheduleBlock, hasSeenProOffer, isPremium, setHasSeenProOffer } = useAppStore();
 
   const p     = usePersonalization();
   const pm    = usePremium();
   const TOTAL = durationMinutes * 60;
 
-  const focusTaskId = taskId ?? `focus-${taskTitle}`;
+  const focusTaskId = taskId ?? null;
+  const isFreeSession = !taskId;
 
   const [timeLeft, setTimeLeft] = useState(TOTAL);
   const [isPaused, setIsPaused] = useState(false);
   const [isCompleted, setIsCompleted] = useState(false);
+  const isPausedRef    = useRef(false);
+  const isCompletedRef = useRef(false);
+  const sessionEndTimeRef  = useRef<number | null>(null);
+  const pausedAtRef        = useRef<number | null>(null);
+  const pausedTimeLeftRef  = useRef<number>(TOTAL);
   const [showReschedule, setShowReschedule] = useState(false);
   const [customMinutes, setCustomMinutes] = useState(
     scheduledTime ? timeStrToMinutes(scheduledTime) : 540,
@@ -161,13 +169,16 @@ export function FocusModeScreen({ navigation, route }: Props) {
   const [coachMsg, setCoachMsg] = useState(fallbackMsg);
 
   useEffect(() => {
-    let cancelled = false;
     const surface = isCompleted
       ? 'focus_complete'
       : progressPct >= 50
       ? 'focus_midway'
       : 'focus_start';
 
+    if (surface === lastCoachSurface.current) return;
+    lastCoachSurface.current = surface;
+
+    let cancelled = false;
     buildCoachingContext()
       .then((ctx) => {
         if (cancelled) return;
@@ -191,17 +202,22 @@ export function FocusModeScreen({ navigation, route }: Props) {
   const completeScale = useRef(new Animated.Value(1)).current;
   const trackedStart = useRef(false);
   const trackedComplete = useRef(false);
+  const lastCoachSurface = useRef<string>('');
 
   useEffect(() => {
     if (trackedStart.current) return;
     trackedStart.current = true;
-    trackTaskStarted(focusTaskId, taskTitle, durationMinutes);
+    if (focusTaskId) {
+      trackTaskStarted(focusTaskId, taskTitle, durationMinutes);
+    }
   }, [durationMinutes, focusTaskId, taskTitle]);
 
   useEffect(() => {
     if (!isCompleted || trackedComplete.current) return;
     trackedComplete.current = true;
-    trackTaskCompleted(focusTaskId, taskTitle, durationMinutes);
+    if (focusTaskId) {
+      trackTaskCompleted(focusTaskId, taskTitle, durationMinutes);
+    }
   }, [durationMinutes, focusTaskId, isCompleted, taskTitle]);
 
   useEffect(() => {
@@ -214,15 +230,58 @@ export function FocusModeScreen({ navigation, route }: Props) {
   }, []);
 
   useEffect(() => {
+    sessionEndTimeRef.current = Date.now() + TOTAL * 1000;
+  }, []);
+
+  useEffect(() => {
     if (isPaused || isCompleted) return;
     const interval = setInterval(() => {
-      setTimeLeft((t) => {
-        if (t <= 1) { clearInterval(interval); setIsCompleted(true); return 0; }
-        return t - 1;
-      });
-    }, 1000);
+      if (sessionEndTimeRef.current === null) return;
+      const remaining = Math.max(
+        0,
+        Math.round((sessionEndTimeRef.current - Date.now()) / 1000),
+      );
+      setTimeLeft(remaining);
+      if (remaining <= 0) {
+        clearInterval(interval);
+        setIsCompleted(true);
+        isCompletedRef.current = true;
+      }
+    }, 500);
     return () => clearInterval(interval);
   }, [isPaused, isCompleted]);
+
+  useEffect(() => {
+    if (isPaused) {
+      pausedAtRef.current = Date.now();
+      pausedTimeLeftRef.current = timeLeft;
+    } else if (pausedAtRef.current !== null) {
+      sessionEndTimeRef.current = Date.now() + pausedTimeLeftRef.current * 1000;
+      pausedAtRef.current = null;
+    }
+  }, [isPaused]);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
+      if (
+        state === 'active' &&
+        !isPausedRef.current &&
+        !isCompletedRef.current &&
+        sessionEndTimeRef.current !== null
+      ) {
+        const remaining = Math.max(
+          0,
+          Math.round((sessionEndTimeRef.current - Date.now()) / 1000),
+        );
+        setTimeLeft(remaining);
+        if (remaining <= 0) {
+          setIsCompleted(true);
+          isCompletedRef.current = true;
+        }
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
   const minutes = Math.floor(timeLeft / 60);
   const seconds = timeLeft % 60;
@@ -238,7 +297,15 @@ export function FocusModeScreen({ navigation, route }: Props) {
       Animated.spring(completeScale, { toValue: 1, useNativeDriver: true }),
     ]).start(() => {
       setIsCompleted(true);
-      setTimeout(() => navigation.goBack(), 1200);
+      isCompletedRef.current = true;
+      setTimeout(() => {
+        if (!hasSeenProOffer && !isPremium) {
+          setHasSeenProOffer(true);
+          navigation.navigate('ProOffer');
+        } else {
+          navigation.goBack();
+        }
+      }, 1200);
     });
   };
 
@@ -274,7 +341,10 @@ export function FocusModeScreen({ navigation, route }: Props) {
         <View style={styles.actionRow}>
           <TouchableOpacity
             style={styles.pauseBtn}
-            onPress={() => setIsPaused((p) => !p)}
+            onPress={() => setIsPaused((p) => {
+              isPausedRef.current = !p;
+              return !p;
+            })}
             activeOpacity={0.85}
           >
             <MaterialCommunityIcons
