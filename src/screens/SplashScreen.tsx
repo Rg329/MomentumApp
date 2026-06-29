@@ -21,7 +21,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Splash'>;
 
 // ─── Feature trust chips ──────────────────────────────────────────────────────
 const FEATURES = [
-  { icon: 'lightning-bolt'   as const, label: 'Smart Scheduling' },
+  { icon: 'brain'            as const, label: 'Smart Scheduling' },
   { icon: 'shield-check'     as const, label: 'Realistic Plans'  },
   { icon: 'chart-areaspline' as const, label: 'Momentum Score'   },
 ];

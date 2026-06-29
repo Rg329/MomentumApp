@@ -877,7 +877,7 @@ export function BrainDumpScreen({ navigation }: Props) {
               ) : (
                 <>
                   <Text style={styles.generateBtnLabel} numberOfLines={1}>
-                    {hasTasks ? `Generate  (${tasks.length})` : 'Generate My Day'}
+                    {hasTasks ? `Generate (${tasks.length})` : 'Generate My Day'}
                   </Text>
                   {hasTasks && (
                     <MaterialCommunityIcons name="arrow-right" size={17} color={Colors.onPrimary} />

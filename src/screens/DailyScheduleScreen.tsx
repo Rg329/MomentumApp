@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,8 @@ import {
   TouchableOpacity,
   ScrollView,
   Modal,
+  Animated,
+  Easing,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -128,6 +130,74 @@ function TimeBlockItem({ block, onPress }: { block: ScheduleBlock; onPress: () =
   );
 }
 
+// ─── Schedule Ready Banner ────────────────────────────────────────────────────
+function ReadyBanner({ taskCount, focusHours, onDismiss }: {
+  taskCount: number; focusHours: string; onDismiss: () => void;
+}) {
+  const slide  = useRef(new Animated.Value(-120)).current;
+  const opacity = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.spring(slide,  { toValue: 0, useNativeDriver: true, tension: 70, friction: 12 }),
+      Animated.timing(opacity, { toValue: 1, duration: 300, useNativeDriver: true }),
+    ]).start();
+    const t = setTimeout(() => {
+      Animated.parallel([
+        Animated.timing(slide,   { toValue: -120, duration: 380, useNativeDriver: true, easing: Easing.in(Easing.cubic) }),
+        Animated.timing(opacity, { toValue: 0,    duration: 280, useNativeDriver: true }),
+      ]).start(() => onDismiss());
+    }, 3200);
+    return () => clearTimeout(t);
+  }, []);
+
+  return (
+    <Animated.View style={[readyStyles.banner, { opacity, transform: [{ translateY: slide }] }]}>
+      <View style={readyStyles.left}>
+        <View style={readyStyles.iconCircle}>
+          <MaterialCommunityIcons name="check-circle" size={22} color={Colors.primary} />
+        </View>
+        <View style={{ gap: 1 }}>
+          <Text style={readyStyles.title}>Your day is ready</Text>
+          <Text style={readyStyles.sub}>{taskCount} task{taskCount !== 1 ? 's' : ''} · {focusHours}h of focus blocked</Text>
+        </View>
+      </View>
+      <TouchableOpacity onPress={onDismiss} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+        <MaterialCommunityIcons name="close" size={16} color={Colors.outline} />
+      </TouchableOpacity>
+    </Animated.View>
+  );
+}
+
+const readyStyles = StyleSheet.create({
+  banner: {
+    marginHorizontal: Spacing.gutter,
+    marginBottom: 8,
+    backgroundColor: Colors.primaryContainer,
+    borderRadius: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: Colors.primary + '25',
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  left:       { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
+  iconCircle: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: Colors.primary + '18',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  title: { fontFamily: 'Manrope_700Bold',    fontSize: 14, color: Colors.onSurface },
+  sub:   { fontFamily: 'Manrope_500Medium',  fontSize: 12, color: Colors.onSurfaceVariant },
+});
+
 export function DailyScheduleScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const p   = usePersonalization();
@@ -157,6 +227,24 @@ export function DailyScheduleScreen() {
 
   const blocks = scheduleBlocks;
   const hasUserTasks = tasks.length > 0;
+
+  // Show "Your day is ready" banner once when blocks first appear
+  const [showReadyBanner, setShowReadyBanner] = useState(false);
+  const prevBlockCount = useRef(0);
+  useEffect(() => {
+    if (blocks.length > 0 && prevBlockCount.current === 0) {
+      setShowReadyBanner(true);
+    }
+    prevBlockCount.current = blocks.length;
+  }, [blocks.length]);
+
+  // Compute focus hours for banner
+  const focusHours = useMemo(() => {
+    const mins = blocks
+      .filter((b) => b.type !== 'break' && b.type !== 'insight')
+      .reduce((acc, b) => acc + (b.duration ? parseInt(b.duration, 10) : 0), 0);
+    return (mins / 60).toFixed(1).replace('.0', '');
+  }, [blocks]);
 
   const scheduleIsStale = scheduleDate !== null && scheduleDate !== today && blocks.length > 0;
   const [showRollover, setShowRollover] = useState(false);
@@ -257,16 +345,38 @@ export function DailyScheduleScreen() {
           </Text>
         </View>
 
+        {/* ── Ready banner ───────────────────────────────────────────────── */}
+        {showReadyBanner && (
+          <ReadyBanner
+            taskCount={tasks.length}
+            focusHours={focusHours}
+            onDismiss={() => setShowReadyBanner(false)}
+          />
+        )}
+
         {/* ── Timeline ───────────────────────────────────────────────────── */}
         {blocks.length === 0 ? (
           <View style={styles.emptySchedule}>
-            <MaterialCommunityIcons name="calendar-blank-outline" size={36} color={Colors.outline} />
-            <Text style={styles.emptyTitle}>No schedule yet</Text>
+            <View style={styles.emptyOrb}>
+              <MaterialCommunityIcons name="calendar-clock" size={32} color={Colors.primary} />
+            </View>
+            <Text style={styles.emptyTitle}>
+              {hasUserTasks ? 'Ready to build your day' : 'Nothing planned yet'}
+            </Text>
             <Text style={styles.emptySub}>
               {hasUserTasks
-                ? 'Tap Regenerate to build your timetable from your tasks.'
-                : 'Add tasks on the Plan tab, then generate your schedule.'}
+                ? `You have ${tasks.length} task${tasks.length !== 1 ? 's' : ''} waiting. Hit Generate on the Plan tab to turn them into a schedule.`
+                : 'Head to the Plan tab, add what you want to accomplish today, then hit Generate.'}
             </Text>
+            <TouchableOpacity
+              style={styles.emptyBtn}
+              onPress={() => navigation.navigate('MainTabs', { screen: 'Focus' })}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.emptyBtnLabel}>
+                {hasUserTasks ? 'Back to Generate →' : 'Add Tasks →'}
+              </Text>
+            </TouchableOpacity>
           </View>
         ) : (
         <View style={styles.timeline}>
@@ -516,20 +626,34 @@ const styles = StyleSheet.create({
   emptySchedule: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 48,
-    paddingHorizontal: 24,
-    gap: 10,
+    paddingVertical: 56,
+    paddingHorizontal: 32,
+    gap: 12,
+  },
+  emptyOrb: {
+    width: 72, height: 72, borderRadius: 36,
+    backgroundColor: Colors.primaryContainer,
+    alignItems: 'center', justifyContent: 'center',
+    marginBottom: 4,
   },
   emptyTitle: {
-    ...Typography.headlineSm,
-    color: Colors.onSurface,
     fontFamily: 'Manrope_700Bold',
+    fontSize: 18, color: Colors.onSurface,
+    textAlign: 'center', letterSpacing: -0.3,
   },
   emptySub: {
-    ...Typography.bodyMd,
-    color: Colors.onSurfaceVariant,
-    textAlign: 'center',
-    lineHeight: 22,
+    fontFamily: 'Manrope_400Regular',
+    fontSize: 14, color: Colors.onSurfaceVariant,
+    textAlign: 'center', lineHeight: 22, maxWidth: 280,
+  },
+  emptyBtn: {
+    marginTop: 4,
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 24, paddingVertical: 12,
+    borderRadius: 50,
+  },
+  emptyBtnLabel: {
+    fontFamily: 'Manrope_700Bold', fontSize: 14, color: Colors.onPrimary,
   },
   headerActions: {
     flexDirection: 'row',
