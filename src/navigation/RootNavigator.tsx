@@ -18,7 +18,7 @@ export type RootStackParamList = {
   Onboarding:   undefined;
   Auth:         undefined;
   Credentials:  undefined;
-  ProOffer:     undefined;
+  ProOffer:     { fromOnboarding?: boolean } | undefined;
   BrainDump:    undefined;
   Constraints:  undefined;
   AIAnalysis:   undefined;

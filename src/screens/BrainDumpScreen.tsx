@@ -631,7 +631,7 @@ function StreakBar({ navigation }: { navigation: Props['navigation'] }) {
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export function BrainDumpScreen({ navigation }: Props) {
-  const { tasks, addTask, updateTask, removeTask, wakeTime, sleepTime, hasSeenWelcomeCard, dismissWelcomeCard, incrementGeneration } = useAppStore();
+  const { tasks, addTask, updateTask, removeTask, wakeTime, sleepTime, hasSeenWelcomeCard, dismissWelcomeCard, incrementGeneration, scheduleBlocks } = useAppStore();
   const procrastinationType = useAppStore((s) => s.onboardingData.procrastinationType);
 
   const SUGGESTIONS_BY_TYPE: Record<string, string[]> = {
@@ -735,7 +735,11 @@ export function BrainDumpScreen({ navigation }: Props) {
           <View style={styles.heroRow}>
             <View style={{ flex: 1, gap: 4 }}>
               <View style={styles.greetingChip}>
-                <MaterialCommunityIcons name="weather-sunny" size={12} color={Colors.primary} />
+                <MaterialCommunityIcons
+                  name={(() => { const h = new Date().getHours(); return h < 12 ? 'weather-sunny' : h < 17 ? 'white-balance-sunny' : h < 21 ? 'weather-sunset' : 'weather-night'; })()}
+                  size={12}
+                  color={Colors.primary}
+                />
                 <Text style={styles.greetingText}>{greeting}</Text>
               </View>
               <Text style={styles.heroTitle}>
@@ -799,7 +803,9 @@ export function BrainDumpScreen({ navigation }: Props) {
             hasTasks ? (
               <View style={{ gap: 10, marginTop: 4 }}>
                 {tasks.length >= 2 && <CapacityCard plannedMins={plannedMins} availableMins={availableMins} />}
-                <PlanPreviewCard tasks={tasks} plannedMins={plannedMins} onPress={() => navigation.navigate('MainTabs', { screen: 'Schedule' })} />
+                {scheduleBlocks.length > 0 && (
+                  <PlanPreviewCard tasks={tasks} plannedMins={plannedMins} onPress={() => navigation.navigate('MainTabs', { screen: 'Schedule' })} />
+                )}
               </View>
             ) : null
           }

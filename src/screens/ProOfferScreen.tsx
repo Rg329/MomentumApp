@@ -28,8 +28,9 @@ const ROWS: { label: string; free: boolean; pro: boolean }[] = [
   { label: 'Weekly coaching reports',      free: false, pro: true  },
 ];
 
-export function ProOfferScreen({ navigation }: Props) {
+export function ProOfferScreen({ navigation, route }: Props) {
   const { startFreeTrial14d, setHasSeenProOffer } = useAppStore();
+  const fromOnboarding = route.params?.fromOnboarding ?? false;
 
   const fade  = useRef(new Animated.Value(0)).current;
   const slide = useRef(new Animated.Value(22)).current;
@@ -64,7 +65,7 @@ export function ProOfferScreen({ navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <TopBar onBack={() => navigation.goBack()} />
+      <TopBar onBack={fromOnboarding ? undefined : () => navigation.goBack()} />
 
       {/* Ambient blobs */}
       <View style={styles.blob1} />
