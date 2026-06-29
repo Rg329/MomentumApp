@@ -742,12 +742,6 @@ export function BrainDumpScreen({ navigation }: Props) {
                 What's on your{'\n'}<Text style={styles.heroTitleAccent}>mind today?</Text>
               </Text>
             </View>
-            {p.profile.coachStyle && (
-              <View style={[styles.coachBadge, { backgroundColor: p.tone.badgeColor + '18', borderColor: p.tone.badgeColor + '35' }]}>
-                <View style={[styles.coachBadgeDot, { backgroundColor: p.tone.badgeColor }]} />
-                <Text style={[styles.coachBadgeLabel, { color: p.tone.badgeColor }]}>{p.tone.badgeLabel}</Text>
-              </View>
-            )}
           </View>
 
           {/* Subtle motivational line */}
@@ -804,7 +798,7 @@ export function BrainDumpScreen({ navigation }: Props) {
           ListFooterComponent={
             hasTasks ? (
               <View style={{ gap: 10, marginTop: 4 }}>
-                <CapacityCard plannedMins={plannedMins} availableMins={availableMins} />
+                {tasks.length >= 2 && <CapacityCard plannedMins={plannedMins} availableMins={availableMins} />}
                 <PlanPreviewCard tasks={tasks} plannedMins={plannedMins} onPress={() => navigation.navigate('MainTabs', { screen: 'Schedule' })} />
               </View>
             ) : null
@@ -1161,7 +1155,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25, shadowRadius: 16, elevation: 7,
   },
   generateBtnDisabled: { opacity: 0.35 },
-  generateBtnGated: { backgroundColor: PREMIUM_COLOR },
+  generateBtnGated: { backgroundColor: Colors.primary, opacity: 0.72 },
   generateBtnLabel: { ...Typography.headlineSm, color: Colors.onPrimary, fontFamily: 'Manrope_700Bold', fontSize: 14 },
   genCountBubble: { backgroundColor: 'rgba(255,255,255,0.22)', borderRadius: 50, paddingHorizontal: 7, paddingVertical: 2 },
   genCountText:   { fontFamily: 'Manrope_600SemiBold', fontSize: 10, color: '#fff', letterSpacing: 0.3 },

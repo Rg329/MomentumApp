@@ -110,7 +110,7 @@ export function OnboardingScreen({ navigation }: Props) {
     if (!showSuccess) return;
     if (didNavigatePost.current) return;
     didNavigatePost.current = true;
-    const t = setTimeout(() => navigation.replace('MainTabs', { screen: 'Focus' }), 900);
+    const t = setTimeout(() => navigation.replace('ProOffer'), 900);
     return () => clearTimeout(t);
   }, [navigation, showSuccess]);
 
@@ -236,7 +236,7 @@ export function OnboardingScreen({ navigation }: Props) {
             </Text>
             <TouchableOpacity
               style={styles.successBtn}
-              onPress={() => navigation.replace('MainTabs', { screen: 'Focus' })}
+              onPress={() => navigation.replace('ProOffer')}
               activeOpacity={0.88}
             >
               <View style={styles.successBtnShine} />

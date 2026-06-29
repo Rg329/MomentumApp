@@ -48,10 +48,18 @@ export function ProOfferScreen({ navigation }: Props) {
     ).start();
   }, []);
 
+  const goNext = () => {
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+    } else {
+      navigation.replace('Auth');
+    }
+  };
+
   const handleTrial = () => {
     startFreeTrial14d();
     setHasSeenProOffer(true);
-    navigation.replace('Auth');
+    goNext();
   };
 
   return (
@@ -119,8 +127,18 @@ export function ProOfferScreen({ navigation }: Props) {
             <View style={styles.proColumnGlow} pointerEvents="none" />
           </View>
 
+          {/* ── Social proof ── */}
+          <View style={styles.socialRow}>
+            {['Students', 'Freelancers', 'Founders'].map((label) => (
+              <View key={label} style={styles.socialChip}>
+                <Text style={styles.socialChipText}>{label}</Text>
+              </View>
+            ))}
+            <Text style={styles.socialLine}>all use Momentum Pro</Text>
+          </View>
+
           {/* ── CTA ── */}
-          <Animated.View style={{ transform: [{ scale: pulse }], marginTop: 8 }}>
+          <Animated.View style={{ transform: [{ scale: pulse }], marginTop: 4 }}>
             <TouchableOpacity style={styles.cta} activeOpacity={0.9} onPress={handleTrial}>
               <View style={styles.ctaShine} />
               <Text style={styles.ctaLabel}>Start 14‑day free trial</Text>
@@ -132,7 +150,7 @@ export function ProOfferScreen({ navigation }: Props) {
 
           <TouchableOpacity
             style={styles.secondary}
-            onPress={() => { setHasSeenProOffer(true); navigation.replace('Auth'); }}
+            onPress={() => { setHasSeenProOffer(true); goNext(); }}
             activeOpacity={0.8}
           >
             <Text style={styles.secondaryLabel}>Continue with free version</Text>
@@ -268,6 +286,16 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.20)',
   },
   ctaPillText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, color: '#fff' },
+
+  socialRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 },
+  socialChip: {
+    backgroundColor: PREMIUM_COLOR + '12',
+    borderRadius: Radius.full,
+    paddingHorizontal: 10, paddingVertical: 4,
+    borderWidth: 1, borderColor: PREMIUM_COLOR + '25',
+  },
+  socialChipText: { fontFamily: 'Manrope_600SemiBold', fontSize: 11, color: PREMIUM_COLOR },
+  socialLine: { fontFamily: 'Manrope_500Medium', fontSize: 12, color: Colors.onSurfaceVariant },
 
   secondary: { alignItems: 'center', paddingVertical: 10 },
   secondaryLabel: { fontFamily: 'Manrope_500Medium', fontSize: 13, color: Colors.outline, textDecorationLine: 'underline' },

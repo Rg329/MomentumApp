@@ -129,6 +129,7 @@ interface AppState {
   completeDailyReview: () => void;
   setLastAuthPromptDate: (date: string) => void;
   recordDayComplete:   () => void; // call when user completes ≥1 task on a given day
+  clearStaleSchedule:  () => void; // wipe schedule blocks if generated on a previous day
   resetStore:          () => void;
 }
 
@@ -272,6 +273,13 @@ export const useAppStore = create<AppState>()(
         const newStreak = s.lastStreakDate === yesterday ? s.currentStreak + 1 : 1;
         const longest = Math.max(newStreak, s.longestStreak);
         set({ currentStreak: newStreak, longestStreak: longest, lastStreakDate: today });
+      },
+      clearStaleSchedule: () => {
+        const today = new Date().toISOString().split('T')[0];
+        const { scheduleDate } = useAppStore.getState();
+        if (scheduleDate && scheduleDate !== today) {
+          set({ scheduleBlocks: [], completedTaskIds: [], scheduleDate: null });
+        }
       },
       resetStore: () => set({
         hasOnboarded:        false,

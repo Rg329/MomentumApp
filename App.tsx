@@ -70,12 +70,12 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    useAppStore.persist.onFinishHydration(() => {
+    const run = () => {
       useAppStore.getState().expireTrialIfNeeded();
-    });
-    if (useAppStore.persist.hasHydrated()) {
-      useAppStore.getState().expireTrialIfNeeded();
-    }
+      useAppStore.getState().clearStaleSchedule();
+    };
+    useAppStore.persist.onFinishHydration(run);
+    if (useAppStore.persist.hasHydrated()) run();
   }, []);
 
   if (!fontsLoaded) {
