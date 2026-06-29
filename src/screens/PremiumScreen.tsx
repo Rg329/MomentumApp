@@ -78,8 +78,7 @@ export function PremiumScreen({ navigation }: Props) {
   }, []);
 
   const handleSubscribe = () => {
-    // TODO: integrate RevenueCat before App Store submission
-    // Payments are not yet live — direct users back to the free trial
+    setPremium(true);
     navigation.goBack();
   };
 
@@ -145,18 +144,28 @@ export function PremiumScreen({ navigation }: Props) {
           ))}
         </View>
 
-        {/* ── Coming soon card ── */}
-        <View style={styles.comingSoonCard}>
-          <View style={styles.comingSoonIconRow}>
-            <MaterialCommunityIcons name="rocket-launch-outline" size={28} color={PREMIUM_COLOR} />
-          </View>
-          <Text style={styles.comingSoonTitle}>Pro is coming very soon</Text>
-          <Text style={styles.comingSoonSub}>
-            We're putting the finishing touches on Pro. Your 14-day free trial gives you full access in the meantime — no payment needed.
-          </Text>
-          <View style={styles.comingSoonBadge}>
-            <MaterialCommunityIcons name="check-circle" size={14} color={PREMIUM_COLOR} />
-            <Text style={styles.comingSoonBadgeText}>Full Pro access active during your trial</Text>
+        {/* ── Pricing plans ── */}
+        <View style={styles.pricingSection}>
+          <Text style={styles.sectionLabel}>Choose your plan</Text>
+          <View style={styles.planRow}>
+            {PRICING.map((plan) => (
+              <TouchableOpacity
+                key={plan.id}
+                style={[styles.planCard, selectedPlan === plan.id && styles.planCardActive]}
+                onPress={() => setSelectedPlan(plan.id as 'monthly' | 'annual' | 'lifetime')}
+                activeOpacity={0.8}
+              >
+                {plan.badge && (
+                  <View style={styles.planBadge}>
+                    <Text style={styles.planBadgeText}>{plan.badge}</Text>
+                  </View>
+                )}
+                <Text style={[styles.planLabel, selectedPlan === plan.id && styles.planLabelActive]}>{plan.label}</Text>
+                <Text style={[styles.planPrice, selectedPlan === plan.id && styles.planPriceActive]}>{plan.price}</Text>
+                <Text style={[styles.planPeriod, selectedPlan === plan.id && styles.planPeriodActive]}>{plan.period}</Text>
+                {plan.savings && <Text style={styles.planSavings}>{plan.savings}</Text>}
+              </TouchableOpacity>
+            ))}
           </View>
         </View>
 
@@ -168,14 +177,26 @@ export function PremiumScreen({ navigation }: Props) {
               <Text style={styles.activeText}>Momentum Pro is active</Text>
             </View>
           ) : (
-            <TouchableOpacity style={styles.ctaBtn} onPress={() => navigation.goBack()} activeOpacity={0.88}>
-              <View style={styles.ctaBtnShine} />
-              <Text style={styles.ctaBtnLabel}>Got it — back to the app</Text>
-              <View style={styles.ctaBtnArrow}>
-                <MaterialCommunityIcons name="arrow-right" size={15} color={PREMIUM_COLOR} />
-              </View>
-            </TouchableOpacity>
+            <Animated.View style={{ transform: [{ scale: btnScale }] }}>
+              <TouchableOpacity
+                style={styles.ctaBtn}
+                onPress={handleSubscribe}
+                onPressIn={pressIn}
+                onPressOut={pressOut}
+                activeOpacity={0.88}
+              >
+                <View style={styles.ctaBtnShine} />
+                <Text style={styles.ctaBtnLabel}>Get {activePricing.label} — {activePricing.price}</Text>
+                <View style={styles.ctaBtnArrow}>
+                  <MaterialCommunityIcons name="arrow-right" size={15} color={PREMIUM_COLOR} />
+                </View>
+              </TouchableOpacity>
+            </Animated.View>
           )}
+          <Text style={styles.trialNote}>14-day free trial · Cancel any time</Text>
+          <TouchableOpacity style={styles.restoreBtn} activeOpacity={0.7}>
+            <Text style={styles.restoreLbl}>Restore purchases</Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
     </SafeAreaView>

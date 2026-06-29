@@ -1,19 +1,20 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ActivityIndicator, ScrollView } from 'react-native';
+﻿import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  View, Text, StyleSheet, TextInput, TouchableOpacity,
+  ActivityIndicator, ScrollView,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import * as Linking from 'expo-linking';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/RootNavigator';
 import { Colors, Typography, Spacing, Radius, Shadow } from '../theme';
 import { supabase } from '../supabase/client';
-import { completeMagicLinkSignIn, createSessionFromUrl } from '../supabase/authCallback';
 import { formatSupabaseAuthError } from '../supabase/config';
 import { useAppStore } from '../store/useAppStore';
 import { syncOnboardingProfileToSupabase } from '../repositories/profileSync';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Auth'>;
-type Step = 'email' | 'sent';
+type Step = 'email' | 'otp';
 
 function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
@@ -23,16 +24,24 @@ export function AuthScreen({ navigation }: Props) {
   const { account, setAccount } = useAppStore();
   const [step, setStep] = useState<Step>('email');
   const [email, setEmail] = useState(account.email ?? '');
-  const [pastedLink, setPastedLink] = useState('');
+  const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [info, setInfo] = useState<string | null>(null);
   const [resendCooldown, setResendCooldown] = useState(0);
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const handledSession = useRef(false);
+  const otpInputRef = useRef<TextInput>(null);
 
   useEffect(() => () => {
     if (cooldownRef.current) clearInterval(cooldownRef.current);
+  }, []);
+
+  // Listen for auth state changes (handles magic link fallback)
+  useEffect(() => {
+    const { data: authSub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session && event === 'SIGNED_IN') completeSignIn(session.user.email);
+    });
+    return () => authSub.subscription.unsubscribe();
   }, []);
 
   const completeSignIn = (signedInEmail: string | null | undefined) => {
@@ -46,39 +55,6 @@ export function AuthScreen({ navigation }: Props) {
     syncOnboardingProfileToSupabase();
     navigation.replace('Credentials');
   };
-
-  useEffect(() => {
-    const handleAuthUrl = async (url: string) => {
-      if (!url.includes('auth/callback')) return;
-      setLoading(true);
-      setError(null);
-      try {
-        const session = await createSessionFromUrl(url);
-        if (session) completeSignIn(session.user.email);
-      } catch (e: unknown) {
-        setError(formatSupabaseAuthError(e));
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    Linking.getInitialURL().then((url) => {
-      if (url) handleAuthUrl(url);
-    });
-
-    const linkSub = Linking.addEventListener('url', ({ url }) => handleAuthUrl(url));
-
-    const { data: authSub } = supabase.auth.onAuthStateChange((event, session) => {
-      if (session && event === 'SIGNED_IN') {
-        completeSignIn(session.user.email);
-      }
-    });
-
-    return () => {
-      linkSub.remove();
-      authSub.subscription.unsubscribe();
-    };
-  }, [account.createdAt, email, navigation, setAccount]);
 
   const startResendCooldown = (seconds = 60) => {
     setResendCooldown(seconds);
@@ -95,21 +71,11 @@ export function AuthScreen({ navigation }: Props) {
     }, 1000);
   };
 
-  const canSend = useMemo(() => isValidEmail(email), [email]);
-  const canResend = useMemo(() => canSend && resendCooldown === 0, [canSend, resendCooldown]);
-  const canCompletePaste = useMemo(() => {
-    const value = pastedLink.trim();
-    if (!value) return false;
-    if (/^\d{6,8}$/.test(value.replace(/\s/g, ''))) return true;
-    return value.includes('supabase.co') || value.length > 24;
-  }, [pastedLink]);
-
-  const sendMagicLink = async () => {
-    if (!canSend || resendCooldown > 0) return;
+  const sendOtp = async () => {
+    if (!isValidEmail(email) || resendCooldown > 0) return;
     setLoading(true);
     setError(null);
-    setInfo(null);
-    setPastedLink('');
+    setOtp('');
     handledSession.current = false;
 
     try {
@@ -119,10 +85,8 @@ export function AuthScreen({ navigation }: Props) {
       });
       if (e) throw e;
       startResendCooldown(60);
-      setStep('sent');
-      setInfo(
-        'Expo Go cannot open the email link in a browser. Copy the link from Gmail and paste it below instead.',
-      );
+      setStep('otp');
+      setTimeout(() => otpInputRef.current?.focus(), 300);
     } catch (e: unknown) {
       setError(formatSupabaseAuthError(e));
     } finally {
@@ -130,26 +94,42 @@ export function AuthScreen({ navigation }: Props) {
     }
   };
 
-  const completeFromPaste = async () => {
-    if (!canCompletePaste || loading) return;
+  const verifyOtp = async () => {
+    const code = otp.trim();
+    if (code.length < 6 || loading) return;
     setLoading(true);
     setError(null);
     handledSession.current = false;
+
     try {
-      const session = await completeMagicLinkSignIn(pastedLink, email);
-      if (session) completeSignIn(session.user.email);
+      const { data, error: e } = await supabase.auth.verifyOtp({
+        email: email.trim().toLowerCase(),
+        token: code,
+        type: 'email',
+      });
+      if (e) throw e;
+      if (data.session) completeSignIn(data.session.user.email);
     } catch (e: unknown) {
       setError(formatSupabaseAuthError(e));
     } finally {
       setLoading(false);
     }
   };
+
+  const canSend = useMemo(() => isValidEmail(email), [email]);
+  const canVerify = otp.trim().length >= 6;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.blob1} />
       <View style={styles.blob2} />
-      <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.7} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+
+      <TouchableOpacity
+        style={styles.backBtn}
+        onPress={() => step === 'otp' ? (setStep('email'), setError(null), setOtp('')) : navigation.goBack()}
+        activeOpacity={0.7}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+      >
         <MaterialCommunityIcons name="chevron-left" size={24} color={Colors.onSurface} />
       </TouchableOpacity>
 
@@ -158,20 +138,24 @@ export function AuthScreen({ navigation }: Props) {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
+        {/* ── Hero ── */}
         <View style={styles.hero}>
           <Text style={styles.kicker}>WELCOME TO MOMENTUM</Text>
-          <Text style={styles.title}>Sign in to continue</Text>
+          <Text style={styles.title}>
+            {step === 'email' ? 'Sign in to\ncontinue' : 'Enter your\ncode'}
+          </Text>
           <Text style={styles.sub}>
             {step === 'email'
-              ? 'We’ll email you a secure sign-in link. No password needed.'
-              : 'Copy the sign-in link from your email and paste it below.'}
+              ? 'We will send a sign-in code to your email. No password needed.'
+              : `We sent a code to\n${email.trim().toLowerCase()}`}
           </Text>
         </View>
 
+        {/* ── Card ── */}
         <View style={styles.card}>
           {step === 'email' ? (
             <>
-              <Text style={styles.label}>Email</Text>
+              <Text style={styles.label}>Email address</Text>
               <TextInput
                 value={email}
                 onChangeText={(t) => { setEmail(t); if (error) setError(null); }}
@@ -179,75 +163,88 @@ export function AuthScreen({ navigation }: Props) {
                 placeholderTextColor={Colors.outline}
                 keyboardType="email-address"
                 autoCapitalize="none"
+                autoCorrect={false}
                 style={styles.input}
                 editable={!loading}
-                returnKeyType="done"
+                returnKeyType="send"
+                onSubmitEditing={sendOtp}
               />
             </>
           ) : (
-            <View style={styles.sentBox}>
-              <View style={styles.sentIcon}>
-                <MaterialCommunityIcons name="email-check-outline" size={28} color={Colors.primary} />
+            <>
+              <View style={styles.otpIconRow}>
+                <View style={styles.otpIcon}>
+                  <MaterialCommunityIcons name="email-check-outline" size={26} color={Colors.primary} />
+                </View>
+                <Text style={styles.otpIconLabel}>Code sent — check your inbox</Text>
               </View>
-              <Text style={styles.sentTitle}>Check your email</Text>
-              <Text style={styles.sentEmail}>{email.trim().toLowerCase()}</Text>
-              <Text style={styles.sentHint}>
-                1. Open the email on this phone{'\n'}
-                2. Long-press <Text style={styles.sentBold}>Sign in</Text> → <Text style={styles.sentBold}>Copy link</Text> (not “Copy text”){'\n'}
-                3. Paste below — must start with <Text style={styles.sentBold}>https://…supabase.co</Text>{'\n'}
-                4. Do not tap the link first (that uses it up)
-              </Text>
-              <Text style={[styles.label, { marginTop: 12, alignSelf: 'flex-start' }]}>Pasted sign-in link</Text>
+
+              <Text style={styles.label}>Sign-in code</Text>
               <TextInput
-                value={pastedLink}
-                onChangeText={(t) => { setPastedLink(t); if (error) setError(null); }}
-                placeholder="https://xxxx.supabase.co/auth/v1/verify?token=..."
+                ref={otpInputRef}
+                value={otp}
+                onChangeText={(t) => {
+                  const digits = t.replace(/\D/g, '').slice(0, 8);
+                  setOtp(digits);
+                  if (error) setError(null);
+                }}
+                placeholder="00000000"
                 placeholderTextColor={Colors.outline}
-                style={[styles.input, styles.pasteInput]}
+                keyboardType="number-pad"
+                style={[styles.input, styles.otpInput]}
                 editable={!loading}
-                autoCapitalize="none"
-                autoCorrect={false}
-                multiline
+                returnKeyType="done"
+                onSubmitEditing={verifyOtp}
+                maxLength={8}
               />
-            </View>
+              <Text style={styles.otpHint}>
+                Can't find it? Check your spam folder.
+              </Text>
+            </>
           )}
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
-          {info ? <Text style={styles.info}>{info}</Text> : null}
         </View>
 
+        {/* ── CTA ── */}
         {step === 'email' ? (
           <TouchableOpacity
             style={[styles.cta, !canSend && styles.ctaDisabled]}
-            onPress={sendMagicLink}
+            onPress={sendOtp}
             disabled={!canSend || loading}
             activeOpacity={0.88}
           >
-            {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.ctaLabel}>Send sign-in link</Text>}
+            {loading
+              ? <ActivityIndicator color="#fff" />
+              : <Text style={styles.ctaLabel}>Send code</Text>}
           </TouchableOpacity>
         ) : (
           <View style={{ gap: 10 }}>
             <TouchableOpacity
-              style={[styles.cta, !canCompletePaste && styles.ctaDisabled]}
-              onPress={completeFromPaste}
-              disabled={!canCompletePaste || loading}
+              style={[styles.cta, !canVerify && styles.ctaDisabled]}
+              onPress={verifyOtp}
+              disabled={!canVerify || loading}
               activeOpacity={0.88}
             >
-              {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.ctaLabel}>Complete sign-in</Text>}
+              {loading
+                ? <ActivityIndicator color="#fff" />
+                : <Text style={styles.ctaLabel}>Verify code</Text>}
             </TouchableOpacity>
+
             <TouchableOpacity
               style={styles.secondary}
-              onPress={sendMagicLink}
-              disabled={!canResend || loading}
+              onPress={sendOtp}
+              disabled={resendCooldown > 0 || loading}
               activeOpacity={0.85}
             >
-              <Text style={styles.secondaryLabel}>
-                {resendCooldown > 0 ? `Resend link (${resendCooldown}s)` : 'Resend link'}
+              <Text style={[styles.secondaryLabel, resendCooldown > 0 && { color: Colors.outline + '80' }]}>
+                {resendCooldown > 0 ? `Resend code in ${resendCooldown}s` : 'Resend code'}
               </Text>
             </TouchableOpacity>
+
             <TouchableOpacity
               style={styles.secondary}
-              onPress={() => { setStep('email'); setInfo(null); setError(null); setPastedLink(''); }}
+              onPress={() => { setStep('email'); setError(null); setOtp(''); }}
               disabled={loading}
               activeOpacity={0.85}
             >
@@ -284,21 +281,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   blob1: {
-    position: 'absolute',
-    top: -90,
-    right: -90,
-    width: 340,
-    height: 340,
-    borderRadius: 170,
+    position: 'absolute', top: -90, right: -90,
+    width: 340, height: 340, borderRadius: 170,
     backgroundColor: Colors.primary + '10',
   },
   blob2: {
-    position: 'absolute',
-    bottom: 60,
-    left: -110,
-    width: 300,
-    height: 300,
-    borderRadius: 150,
+    position: 'absolute', bottom: 60, left: -110,
+    width: 300, height: 300, borderRadius: 150,
     backgroundColor: Colors.primaryFixed + '35',
   },
   content: { flexGrow: 1, paddingHorizontal: Spacing.gutter, paddingTop: 28, paddingBottom: 24, gap: 18 },
@@ -310,7 +299,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surfaceContainerLowest,
     borderRadius: Radius.xl,
     padding: 16,
-    gap: 8,
+    gap: 10,
     ...Shadow.card,
   },
   label: { ...Typography.labelSm, color: Colors.secondary, textTransform: 'uppercase', letterSpacing: 1.2, fontSize: 10 },
@@ -325,22 +314,22 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: Colors.onSurface,
   },
-  pasteInput: { minHeight: 72, textAlignVertical: 'top' },
-  sentBox: { alignItems: 'center', gap: 8, paddingVertical: 4, width: '100%' },
-  sentIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: Colors.primaryFixed,
-    alignItems: 'center',
-    justifyContent: 'center',
+  otpInput: {
+    fontSize: 28,
+    fontFamily: 'Manrope_700Bold',
+    letterSpacing: 12,
+    textAlign: 'center',
+    paddingVertical: 16,
   },
-  sentTitle: { ...Typography.headlineSm, color: Colors.onSurface, fontFamily: 'Manrope_700Bold' },
-  sentEmail: { ...Typography.bodyMd, color: Colors.primary, fontFamily: 'Manrope_600SemiBold' },
-  sentHint: { ...Typography.bodyMd, color: Colors.onSurfaceVariant, textAlign: 'left', lineHeight: 22, width: '100%' },
-  sentBold: { fontFamily: 'Manrope_700Bold', color: Colors.onSurface },
-  error: { ...Typography.bodyMd, color: Colors.error, marginTop: 6 },
-  info: { ...Typography.bodyMd, color: Colors.secondary, marginTop: 6 },
+  otpIconRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4 },
+  otpIcon: {
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: Colors.primaryFixed,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  otpIconLabel: { fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: Colors.onSurface, flex: 1 },
+  otpHint: { fontFamily: 'Manrope_400Regular', fontSize: 12, color: Colors.outline },
+  error: { ...Typography.bodyMd, color: Colors.error, marginTop: 4 },
   cta: {
     backgroundColor: Colors.primary,
     borderRadius: Radius.xl,
