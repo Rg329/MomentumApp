@@ -50,7 +50,9 @@ export function ProOfferScreen({ navigation, route }: Props) {
   }, []);
 
   const goNext = () => {
-    if (navigation.canGoBack()) {
+    if (fromOnboarding) {
+      navigation.replace('Auth');
+    } else if (navigation.canGoBack()) {
       navigation.goBack();
     } else {
       navigation.replace('Auth');
