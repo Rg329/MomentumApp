@@ -78,7 +78,8 @@ export function PremiumScreen({ navigation }: Props) {
   }, []);
 
   const handleSubscribe = () => {
-    setPremium(true);
+    // TODO: integrate RevenueCat before App Store submission
+    // Payments are not yet live — direct users back to the free trial
     navigation.goBack();
   };
 
@@ -144,58 +145,18 @@ export function PremiumScreen({ navigation }: Props) {
           ))}
         </View>
 
-        {/* ── Pricing plans ── */}
-        <View style={styles.pricingSection}>
-          <Text style={styles.sectionLabel}>Choose your plan</Text>
-          <View style={styles.planRow}>
-            {PRICING.map((plan) => {
-              const active = selectedPlan === plan.id;
-              return (
-                <TouchableOpacity
-                  key={plan.id}
-                  style={[styles.planCard, active && styles.planCardActive]}
-                  onPress={() => setSelectedPlan(plan.id)}
-                  activeOpacity={0.82}
-                >
-                  {plan.badge && (
-                    <View style={styles.planBadge}>
-                      <Text style={styles.planBadgeText}>{plan.badge}</Text>
-                    </View>
-                  )}
-                  <Text style={[styles.planLabel, active && styles.planLabelActive]}>{plan.label}</Text>
-                  <Text style={[styles.planPrice, active && styles.planPriceActive]}>{plan.price}</Text>
-                  <Text style={[styles.planPeriod, active && styles.planPeriodActive]}>{plan.period}</Text>
-                  {plan.savings && (
-                    <Text style={styles.planSavings}>{plan.savings}</Text>
-                  )}
-                </TouchableOpacity>
-              );
-            })}
+        {/* ── Coming soon card ── */}
+        <View style={styles.comingSoonCard}>
+          <View style={styles.comingSoonIconRow}>
+            <MaterialCommunityIcons name="rocket-launch-outline" size={28} color={PREMIUM_COLOR} />
           </View>
-        </View>
-
-        {/* ── Free vs Premium comparison strip ── */}
-        <View style={styles.compareStrip}>
-          <View style={styles.compareCol}>
-            <Text style={styles.compareColLabel}>Free</Text>
-            {['3 regenerations / day', 'Basic coach styles', 'Task scheduling', 'Capacity analysis'].map((f) => (
-              <View key={f} style={styles.compareRow}>
-                <MaterialCommunityIcons name="check" size={13} color={Colors.outline} />
-                <Text style={styles.compareText}>{f}</Text>
-              </View>
-            ))}
-          </View>
-          <View style={[styles.compareCol, styles.compareColPremium]}>
-            <View style={styles.comparePremiumLabel}>
-              <Text style={styles.proStar}>★</Text>
-              <Text style={[styles.compareColLabel, { color: PREMIUM_COLOR }]}>Premium</Text>
-            </View>
-            {['Unlimited regenerations', 'Adaptive coaching AI', 'Advanced optimization', '+ 4 more features'].map((f) => (
-              <View key={f} style={styles.compareRow}>
-                <MaterialCommunityIcons name="check-circle" size={13} color={PREMIUM_COLOR} />
-                <Text style={[styles.compareText, { color: PREMIUM_COLOR, fontFamily: 'Manrope_600SemiBold' }]}>{f}</Text>
-              </View>
-            ))}
+          <Text style={styles.comingSoonTitle}>Pro is coming very soon</Text>
+          <Text style={styles.comingSoonSub}>
+            We're putting the finishing touches on Pro. Your 14-day free trial gives you full access in the meantime — no payment needed.
+          </Text>
+          <View style={styles.comingSoonBadge}>
+            <MaterialCommunityIcons name="check-circle" size={14} color={PREMIUM_COLOR} />
+            <Text style={styles.comingSoonBadgeText}>Full Pro access active during your trial</Text>
           </View>
         </View>
 
@@ -204,35 +165,17 @@ export function PremiumScreen({ navigation }: Props) {
           {pm.isPremium ? (
             <View style={styles.activeCard}>
               <MaterialCommunityIcons name="check-circle" size={22} color={PREMIUM_COLOR} />
-              <Text style={styles.activeText}>Momentum Premium is active</Text>
+              <Text style={styles.activeText}>Momentum Pro is active</Text>
             </View>
           ) : (
-            <>
-              <Animated.View style={{ transform: [{ scale: btnScale }] }}>
-                <TouchableOpacity
-                  style={styles.ctaBtn}
-                  onPress={handleSubscribe}
-                  onPressIn={pressIn}
-                  onPressOut={pressOut}
-                  activeOpacity={1}
-                >
-                  <View style={styles.ctaBtnShine} />
-                  <Text style={styles.ctaBtnLabel}>
-                    Start Free Trial · {activePricing.price}
-                    {activePricing.id !== 'lifetime' ? '/mo' : ''}
-                  </Text>
-                  <View style={styles.ctaBtnArrow}>
-                    <MaterialCommunityIcons name="arrow-right" size={15} color={PREMIUM_COLOR} />
-                  </View>
-                </TouchableOpacity>
-              </Animated.View>
-              <Text style={styles.trialNote}>7-day free trial · Cancel anytime · No spam</Text>
-            </>
+            <TouchableOpacity style={styles.ctaBtn} onPress={() => navigation.goBack()} activeOpacity={0.88}>
+              <View style={styles.ctaBtnShine} />
+              <Text style={styles.ctaBtnLabel}>Got it — back to the app</Text>
+              <View style={styles.ctaBtnArrow}>
+                <MaterialCommunityIcons name="arrow-right" size={15} color={PREMIUM_COLOR} />
+              </View>
+            </TouchableOpacity>
           )}
-
-          <TouchableOpacity style={styles.restoreBtn}>
-            <Text style={styles.restoreLbl}>Already subscribed? Restore purchase</Text>
-          </TouchableOpacity>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -309,6 +252,24 @@ const styles = StyleSheet.create({
   comparePremiumLabel: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   compareRow:  { flexDirection: 'row', alignItems: 'center', gap: 6 },
   compareText: { fontFamily: 'Manrope_400Regular', fontSize: 12, color: Colors.onSurfaceVariant, flex: 1 },
+
+  // Coming soon
+  comingSoonCard: {
+    backgroundColor: PREMIUM_COLOR + '0c',
+    borderRadius: Radius.xl, borderWidth: 1,
+    borderColor: PREMIUM_COLOR + '25',
+    padding: 24, gap: 10, alignItems: 'center',
+  },
+  comingSoonIconRow: {
+    width: 56, height: 56, borderRadius: 28,
+    backgroundColor: PREMIUM_COLOR + '15',
+    alignItems: 'center', justifyContent: 'center',
+    marginBottom: 4,
+  },
+  comingSoonTitle: { fontFamily: 'Manrope_700Bold', fontSize: 17, color: Colors.onSurface, textAlign: 'center' },
+  comingSoonSub:   { fontFamily: 'Manrope_400Regular', fontSize: 13, color: Colors.onSurfaceVariant, textAlign: 'center', lineHeight: 20 },
+  comingSoonBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: PREMIUM_COLOR + '10', borderRadius: 50, paddingHorizontal: 12, paddingVertical: 6 },
+  comingSoonBadgeText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, color: PREMIUM_COLOR },
 
   // CTA
   ctaBlock:   { gap: 10, alignItems: 'center' },

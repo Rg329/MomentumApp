@@ -1,24 +1,21 @@
 {
   "expo": {
-    "name": "MomentumApp",
+    "name": "Momentum",
     "slug": "MomentumApp",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "scheme": "momentumapp",
-    "plugins": [
-      [
-        "expo-notifications",
-        {
-          "icon": "./assets/icon.png",
-          "color": "#ffffff",
-          "sounds": []
-        }
-      ]
-    ],
+    "plugins": [],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": false,
+      "bundleIdentifier": "com.momentumapp.focus",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSUserTrackingUsageDescription": "We use anonymised analytics to improve the app experience.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {

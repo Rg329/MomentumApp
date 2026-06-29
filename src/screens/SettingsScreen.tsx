@@ -12,6 +12,7 @@ import {
   Alert,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Linking from 'expo-linking';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useNavigation, CommonActions } from '@react-navigation/native';
@@ -154,15 +155,10 @@ const cardStyles = StyleSheet.create({
 });
 
 function InfoModal({
-  visible,
-  title,
-  body,
-  onClose,
+  visible, title, body, onClose, onAction, actionLabel,
 }: {
-  visible: boolean;
-  title: string;
-  body: string;
-  onClose: () => void;
+  visible: boolean; title: string; body: string;
+  onClose: () => void; onAction?: () => void; actionLabel?: string;
 }) {
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -170,6 +166,11 @@ function InfoModal({
         <View style={infoStyles.card}>
           <Text style={infoStyles.title}>{title}</Text>
           <Text style={infoStyles.body}>{body}</Text>
+          {onAction && actionLabel && (
+            <TouchableOpacity style={infoStyles.actionBtn} onPress={onAction} activeOpacity={0.8}>
+              <Text style={infoStyles.actionBtnLabel}>{actionLabel}</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={infoStyles.btn} onPress={onClose} activeOpacity={0.85}>
             <Text style={infoStyles.btnLabel}>Got it</Text>
           </TouchableOpacity>
@@ -203,6 +204,8 @@ const infoStyles = StyleSheet.create({
     alignItems: 'center',
   },
   btnLabel: { fontFamily: 'Manrope_700Bold', fontSize: 14, color: Colors.onPrimary },
+  actionBtn: { borderWidth: 1, borderColor: Colors.primary, borderRadius: Radius.lg, paddingVertical: 12, alignItems: 'center' },
+  actionBtnLabel: { fontFamily: 'Manrope_600SemiBold', fontSize: 14, color: Colors.primary },
 });
 
 const COACH_OPTIONS: PickerOption[] = [
@@ -634,8 +637,10 @@ export function SettingsScreen() {
       <InfoModal
         visible={infoModal === 'privacy'}
         title="Data & Privacy"
-        body={'Your tasks and schedule are stored on this device. If you sign in, onboarding preferences and behavioral events sync to Supabase under your account.\n\nWe do not sell your data. You can clear local data by uninstalling the app.'}
+        body={'Your tasks and schedule are stored on this device. If you sign in, onboarding preferences and behavioural events sync to Supabase under your account.\n\nWe do not sell your data. You can delete your data by resetting the app below.\n\nTap below to read our full Privacy Policy.'}
         onClose={() => setInfoModal(null)}
+        onAction={() => Linking.openURL('https://www.privacypolicies.com/live/your-policy-id')}
+        actionLabel="View Privacy Policy"
       />
 
       <InfoModal
