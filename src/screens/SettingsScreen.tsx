@@ -32,6 +32,7 @@ import { openLegalUrl, PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from '../legal
 import { minutesToDisplayTime, durationMinutesLabel } from '../utils/formatTime';
 import { NOTIFICATIONS_ENABLED } from '../notifications/config';
 import { ensureNotificationPermissionsIfEnabled } from '../notifications/safeEntry';
+import { useAuthSession } from '../auth/useAuthSession';
 
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
 
@@ -157,6 +158,40 @@ const cardStyles = StyleSheet.create({
   upgradeSub:   { fontFamily: 'Manrope_400Regular', fontSize: 12, color: Colors.onSurfaceVariant, lineHeight: 17 },
 });
 
+function SignInCard({
+  pendingEventCount,
+  onSignIn,
+}: {
+  pendingEventCount: number;
+  onSignIn: () => void;
+}) {
+  return (
+    <TouchableOpacity style={[cardStyles.card, signInCardStyles.card]} onPress={onSignIn} activeOpacity={0.88}>
+      <View style={cardStyles.row}>
+        <View style={[cardStyles.iconWrap, { backgroundColor: Colors.primaryFixed }]}>
+          <MaterialCommunityIcons name="account-lock-outline" size={22} color={Colors.primary} />
+        </View>
+        <View style={{ flex: 1, gap: 3 }}>
+          <Text style={cardStyles.upgradeTitle}>Sign in to Momentum</Text>
+          <Text style={cardStyles.upgradeSub}>
+            {pendingEventCount > 0
+              ? `${pendingEventCount} update${pendingEventCount !== 1 ? 's' : ''} waiting to sync — one email code, no password.`
+              : 'Back up tasks, check-ins, and coaching insights to your account.'}
+          </Text>
+        </View>
+        <MaterialCommunityIcons name="chevron-right" size={20} color={Colors.primary} />
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+const signInCardStyles = StyleSheet.create({
+  card: {
+    borderColor: Colors.primary + '35',
+    shadowColor: Colors.primary,
+  },
+});
+
 function InfoModal({
   visible, title, body, onClose,
 }: {
@@ -256,6 +291,7 @@ export function SettingsScreen() {
   const pm = usePremium();
   const isPremium = pm.isPremium;
   const p  = usePersonalization();
+  const { isSignedIn, pendingEventCount } = useAuthSession();
 
   const [picker, setPicker] = useState<PickerKind>(null);
   const [upgradeFeature, setUpgradeFeature] = useState<FeatureId>('adaptive_coaching');
@@ -439,6 +475,14 @@ export function SettingsScreen() {
     {
       title: 'Account',
       items: [
+        ...(isSignedIn === false
+          ? [{
+              label: 'Sign In',
+              value: pendingEventCount > 0 ? `${pendingEventCount} to sync` : 'Email code',
+              icon: 'login' as IconName,
+              onPress: () => navigation.navigate('Auth'),
+            }]
+          : []),
         {
           label: 'Profile',
           value: account.name ?? 'Set up',
@@ -565,6 +609,13 @@ export function SettingsScreen() {
         </View>
 
         <PremiumCard isPremium={isPremium} onUpgrade={() => navigation.navigate('Premium')} />
+
+        {isSignedIn === false && (
+          <SignInCard
+            pendingEventCount={pendingEventCount}
+            onSignIn={() => navigation.navigate('Auth')}
+          />
+        )}
 
         {SECTIONS.map((section) => (
           <View key={section.title} style={styles.section}>

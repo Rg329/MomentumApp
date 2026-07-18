@@ -15,7 +15,7 @@ export const TASK_EVENT_TYPES = [
 export type TaskEventType = (typeof TASK_EVENT_TYPES)[number];
 
 export type TaskEventMetadata = {
-  source?: 'brain_dump' | 'schedule' | 'focus_mode' | 'manual';
+  source?: 'brain_dump' | 'schedule' | 'focus_mode' | 'manual' | 'check_in';
   previous_time?: string;
   new_time?: string;
   skip_reason?: string;

@@ -17,7 +17,7 @@ import { RootNavigator } from './src/navigation/RootNavigator';
 import { Colors } from './src/theme';
 import { createSessionFromUrl } from './src/supabase/authCallback';
 import { supabase } from './src/supabase/client';
-import { syncOnboardingProfileToSupabase } from './src/repositories/profileSync';
+import { runPostSignInSync } from './src/auth/onSignInSync';
 import { useAppStore } from './src/store/useAppStore';
 import { NOTIFICATIONS_ENABLED } from './src/notifications/config';
 import {
@@ -107,7 +107,9 @@ export default function App() {
       if (!session) return;
 
       if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
-        syncOnboardingProfileToSupabase();
+        runPostSignInSync().catch((e) => {
+          console.warn('[Auth] Post sign-in sync failed:', e);
+        });
         try {
           await logInRevenueCat(session.user.id);
         } catch (e) {

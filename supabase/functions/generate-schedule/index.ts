@@ -95,6 +95,8 @@ Deno.serve(async (req) => {
       sleepTime,
       constraints,
       deadlines,
+      behavioralContext,
+      scheduleHints,
     } = await req.json();
 
     const client = new Anthropic({ apiKey: Deno.env.get('ANTHROPIC_API_KEY') });
@@ -117,6 +119,34 @@ Deno.serve(async (req) => {
       .map((t: any, i: number) => `  ${i + 1}. "${t.text}" — ${t.durationMinutes} min`)
       .join('\n');
 
+    const behaviorText = behavioralContext
+      ? [
+          `Primary behavioral signal: ${behavioralContext.primarySignal ?? 'none'}`,
+          behavioralContext.bestFocusPeriod
+            ? `Observed best focus: ${behavioralContext.bestFocusPeriod}`
+            : null,
+          behavioralContext.metrics
+            ? `Completion rate: ${Math.round((behavioralContext.metrics.completionRate ?? 0) * 100)}% · Completed: ${behavioralContext.metrics.tasksCompleted ?? 0} · Skipped: ${behavioralContext.metrics.tasksSkipped ?? 0} · Rescheduled: ${behavioralContext.metrics.tasksRescheduled ?? 0}`
+            : null,
+          (behavioralContext.patterns ?? []).length
+            ? `Detected patterns:\n${(behavioralContext.patterns as any[]).map((p: any) => `  - ${p.label}: ${p.description}`).join('\n')}`
+            : null,
+          (behavioralContext.coachingDirectives ?? []).length
+            ? `Coaching directives:\n${(behavioralContext.coachingDirectives as string[]).map((d) => `  - ${d}`).join('\n')}`
+            : null,
+        ].filter(Boolean).join('\n')
+      : '  Not enough behavioral data yet — rely on onboarding profile.';
+
+    const hintsText = scheduleHints
+      ? [
+          `Max visible tasks: ${scheduleHints.maxVisibleTasks ?? 'default'}`,
+          `Chunk threshold: ${scheduleHints.chunkThresholdMinutes ?? 'default'} min`,
+          `Break large tasks: ${scheduleHints.breakLargeTasks ? 'yes' : 'no'}`,
+          `Energy pattern: ${scheduleHints.energyPattern ?? 'balanced'}`,
+          scheduleHints.scheduleRationale ? `Rationale: ${scheduleHints.scheduleRationale}` : null,
+        ].filter(Boolean).join('\n')
+      : '  Use default scheduling heuristics.';
+
     const prompt = `You are Momentum, a productivity coach building a personalised daily schedule.
 
 USER PROFILE:
@@ -124,6 +154,12 @@ USER PROFILE:
 - Peak energy time: ${peakTime ?? 'morning'}
 - Day starts: ${wakeStr}
 - Day ends: ${sleepStr}
+
+BEHAVIORAL INTELLIGENCE (from real task events — prioritize over generic advice):
+${behaviorText}
+
+SCHEDULE ADJUSTMENTS (apply these constraints):
+${hintsText}
 
 TASKS TO SCHEDULE:
 ${tasksText}

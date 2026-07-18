@@ -31,6 +31,10 @@ export type CoachingContext = AICoachingContext & {
   localTasks: Task[];
   scheduleBlockCount: number;
   hasBehavioralData: boolean;
+  isSignedIn: boolean;
+  pendingEventCount: number;
+  localCompletedCount: number;
+  localSkippedCount: number;
 };
 
 export type CoachingOptions = {

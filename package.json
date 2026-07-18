@@ -45,6 +45,7 @@
   "scripts": {
     "start": "expo start",
     "start:go": "expo start --go",
+    "start:go:clean": "expo start --go --clear",
     "start:dev": "expo start --dev-client",
     "android": "expo start --android",
     "ios": "expo start --ios",

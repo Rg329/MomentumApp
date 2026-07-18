@@ -11,7 +11,7 @@ import { Colors, Typography, Spacing, Radius, Shadow } from '../theme';
 import { supabase } from '../supabase/client';
 import { formatSupabaseAuthError } from '../supabase/config';
 import { useAppStore } from '../store/useAppStore';
-import { syncOnboardingProfileToSupabase } from '../repositories/profileSync';
+import { runPostSignInSync } from '../auth/onSignInSync';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Auth'>;
 type Step = 'email' | 'otp';
@@ -20,8 +20,11 @@ function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 }
 
-export function AuthScreen({ navigation }: Props) {
-  const { account, setAccount } = useAppStore();
+export function AuthScreen({ navigation, route }: Props) {
+  const fromSavePrompt = route.params?.fromSavePrompt ?? false;
+  const fromCheckIn = route.params?.fromCheckIn ?? false;
+  const fromInsights = route.params?.fromInsights ?? false;
+  const { account, setAccount, dismissSavePrompt } = useAppStore();
   const [step, setStep] = useState<Step>('email');
   const [email, setEmail] = useState(account.email ?? '');
   const [otp, setOtp] = useState('');
@@ -44,7 +47,7 @@ export function AuthScreen({ navigation }: Props) {
     return () => authSub.subscription.unsubscribe();
   }, []);
 
-  const completeSignIn = (signedInEmail: string | null | undefined) => {
+  const completeSignIn = async (signedInEmail: string | null | undefined) => {
     if (handledSession.current) return;
     handledSession.current = true;
     const normalizedEmail = (signedInEmail ?? email).trim().toLowerCase();
@@ -52,7 +55,26 @@ export function AuthScreen({ navigation }: Props) {
       email: normalizedEmail,
       createdAt: account.createdAt ?? new Date().toISOString(),
     });
-    syncOnboardingProfileToSupabase();
+
+    try {
+      await runPostSignInSync();
+    } catch (e) {
+      console.warn('[Auth] Post sign-in sync failed:', e);
+    }
+
+    if (fromSavePrompt) {
+      dismissSavePrompt();
+      navigation.replace('MainTabs', { screen: 'Schedule' });
+      return;
+    }
+    if (fromCheckIn) {
+      navigation.replace('MainTabs', { screen: 'Schedule' });
+      return;
+    }
+    if (fromInsights) {
+      navigation.replace('MainTabs', { screen: 'Insights' });
+      return;
+    }
     navigation.replace('Credentials');
   };
 
@@ -140,13 +162,19 @@ export function AuthScreen({ navigation }: Props) {
       >
         {/* ── Hero ── */}
         <View style={styles.hero}>
-          <Text style={styles.kicker}>WELCOME TO MOMENTUM</Text>
+          <Text style={styles.kicker}>
+            {fromSavePrompt ? 'SAVE YOUR PLAN' : 'WELCOME TO MOMENTUM'}
+          </Text>
           <Text style={styles.title}>
-            {step === 'email' ? 'Sign in to\ncontinue' : 'Enter your\ncode'}
+            {step === 'email'
+              ? (fromSavePrompt ? 'Back up today\'s\nplan' : 'Sign in to\ncontinue')
+              : 'Enter your\ncode'}
           </Text>
           <Text style={styles.sub}>
             {step === 'email'
-              ? 'We will send a sign-in code to your email. No password needed.'
+              ? (fromSavePrompt
+                ? 'Sign in with a one-time code — your tasks and schedule sync to your account.'
+                : 'We will send a sign-in code to your email. No password needed.')
               : `We sent a code to\n${email.trim().toLowerCase()}`}
           </Text>
         </View>
@@ -255,7 +283,14 @@ export function AuthScreen({ navigation }: Props) {
 
         <TouchableOpacity
           style={styles.secondary}
-          onPress={() => navigation.replace('MainTabs', { screen: 'Schedule' })}
+          onPress={() => {
+            if (fromSavePrompt) {
+              dismissSavePrompt();
+              navigation.replace('MainTabs', { screen: 'Schedule' });
+            } else {
+              navigation.replace('MainTabs', { screen: 'Focus' });
+            }
+          }}
           disabled={loading}
           activeOpacity={0.85}
         >

@@ -76,12 +76,25 @@ const DEFAULT_PREFERENCES: AppPreferences = {
 interface AppState {
   hasOnboarded:        boolean;
   hasSeenWelcomeCard:  boolean;
+  /** User confirmed wake/sleep before first schedule generation. */
+  hasConfirmedDayWindow: boolean;
+  /** User picked or skipped the post-win coaching style prompt. */
+  hasChosenCoachingStyle: boolean;
+  /** User saw or dismissed the post-win save prompt (Phase 5). */
+  hasSeenSavePrompt: boolean;
+  /** User saw or answered the end-of-session tomorrow hook (Phase 6). */
+  hasSeenTomorrowHook: boolean;
+  /** User opted into a daily reminder at wake time. */
+  tomorrowReminderEnabled: boolean;
   onboardingData:      OnboardingData;
   account:             AccountProfile;
   tasks:               Task[];
   scheduleBlocks:      ScheduleBlock[];
   scheduleDate:        string | null;
+  /** Task IDs included in the last generated schedule (for "new task" nudges). */
+  lastScheduledTaskIds: string[];
   completedTaskIds:    string[]; // block IDs marked complete today
+  skippedTaskIds:      string[]; // block IDs skipped today (with reason logged)
   wakeTime:            number;
   sleepTime:           number;
   preferences:         AppPreferences;
@@ -100,11 +113,18 @@ interface AppState {
   dailyGenerations:    number;
   lastGenerationDate:  string | null;
   lastDailyReviewDate: string | null;
+  lastEndOfDayPromptDate: string | null;
   lastAuthPromptDate:  string | null;
 
   // ── Actions ─────────────────────────────────────────────────────────────────
   setHasOnboarded:     (v: boolean) => void;
   dismissWelcomeCard:  () => void;
+  confirmDayWindow:    () => void;
+  chooseCoachingStyle: (style: string) => void;
+  skipCoachingStylePicker: () => void;
+  dismissSavePrompt: () => void;
+  acceptTomorrowReminder: () => void;
+  declineTomorrowReminder: () => void;
   setOnboardingData:   (data: Partial<OnboardingData>) => void;
   setAccount:          (data: Partial<AccountProfile>) => void;
   addTask:             (text: string, durationMinutes: number) => void;
@@ -114,6 +134,7 @@ interface AppState {
   generateScheduleFromUserTasks: () => Promise<ScheduleBlock[]>;
   rescheduleScheduleBlock: (id: string, newTime: string) => void;
   markTaskComplete:    (blockId: string) => void;
+  markTaskSkipped:     (blockId: string) => void;
   clearDayData:        () => void;
   setWakeTime:         (v: number) => void;
   setSleepTime:        (v: number) => void;
@@ -128,6 +149,7 @@ interface AppState {
   expireTrialIfNeeded: () => boolean;
   incrementGeneration: () => void;
   completeDailyReview: () => void;
+  dismissEndOfDayReview: () => void;
   setLastAuthPromptDate: (date: string) => void;
   recordDayComplete:   () => void; // call when user completes ≥1 task on a given day
   clearStaleSchedule:  () => void; // wipe schedule blocks if generated on a previous day
@@ -141,14 +163,21 @@ const storage = Platform.OS === 'web'
 export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
-      hasOnboarded:       false,
-      hasSeenWelcomeCard: false,
-      onboardingData:     { procrastinationType: null, peakTime: null, coaching: null },
+      hasOnboarded:           false,
+      hasSeenWelcomeCard:     false,
+      hasConfirmedDayWindow:  false,
+      hasChosenCoachingStyle: false,
+      hasSeenSavePrompt:        false,
+      hasSeenTomorrowHook:      false,
+      tomorrowReminderEnabled:  false,
+      onboardingData:         { procrastinationType: null, peakTime: null, coaching: null },
       account:            { name: null, email: null, createdAt: null },
       tasks:              [],
       scheduleBlocks:     [],
       scheduleDate:       null,
+      lastScheduledTaskIds: [],
       completedTaskIds:   [],
+      skippedTaskIds:     [],
       wakeTime:           390,
       sleepTime:          1365,
       preferences:        { ...DEFAULT_PREFERENCES },
@@ -163,10 +192,30 @@ export const useAppStore = create<AppState>()(
       dailyGenerations:   0,
       lastGenerationDate: null,
       lastDailyReviewDate:null,
+      lastEndOfDayPromptDate: null,
       lastAuthPromptDate: null,
 
       setHasOnboarded:    (v) => set({ hasOnboarded: v }),
       dismissWelcomeCard: ()  => set({ hasSeenWelcomeCard: true }),
+      confirmDayWindow:   ()  => set({ hasConfirmedDayWindow: true }),
+      chooseCoachingStyle: (style) =>
+        set((s) => ({
+          hasChosenCoachingStyle: true,
+          onboardingData: { ...s.onboardingData, coaching: style },
+        })),
+      skipCoachingStylePicker: () =>
+        set((s) => ({
+          hasChosenCoachingStyle: true,
+          onboardingData: {
+            ...s.onboardingData,
+            coaching: s.onboardingData.coaching ?? 'balanced',
+          },
+        })),
+      dismissSavePrompt: () => set({ hasSeenSavePrompt: true }),
+      acceptTomorrowReminder: () =>
+        set({ hasSeenTomorrowHook: true, tomorrowReminderEnabled: true }),
+      declineTomorrowReminder: () =>
+        set({ hasSeenTomorrowHook: true, tomorrowReminderEnabled: false }),
       setOnboardingData:  (data) =>
         set((s) => ({ onboardingData: { ...s.onboardingData, ...data } })),
       setAccount: (data) => set((s) => ({ account: { ...s.account, ...data } })),
@@ -184,7 +233,7 @@ export const useAppStore = create<AppState>()(
       },
       removeTask: (id) =>
         set((s) => ({ tasks: s.tasks.filter((t) => t.id !== id) })),
-      clearTasks: () => set({ tasks: [], scheduleBlocks: [], completedTaskIds: [] }),
+      clearTasks: () => set({ tasks: [], scheduleBlocks: [], completedTaskIds: [], skippedTaskIds: [] }),
       generateScheduleFromUserTasks: async () => (await buildAndSaveUserSchedule()).blocks,
       rescheduleScheduleBlock: (id, newTime) => {
         const block = useAppStore.getState().scheduleBlocks.find((b) => b.id === id);
@@ -210,11 +259,19 @@ export const useAppStore = create<AppState>()(
           completedTaskIds: s.completedTaskIds.includes(blockId)
             ? s.completedTaskIds
             : [...s.completedTaskIds, blockId],
+          skippedTaskIds: s.skippedTaskIds.filter((id) => id !== blockId),
         }));
         useAppStore.getState().recordDayComplete();
       },
+      markTaskSkipped: (blockId) => {
+        set((s) => ({
+          skippedTaskIds: s.skippedTaskIds.includes(blockId)
+            ? s.skippedTaskIds
+            : [...s.skippedTaskIds, blockId],
+        }));
+      },
       clearDayData: () =>
-        set({ scheduleBlocks: [], completedTaskIds: [], scheduleDate: null }),
+        set({ scheduleBlocks: [], completedTaskIds: [], skippedTaskIds: [], scheduleDate: null, lastScheduledTaskIds: [] }),
       setWakeTime: (v) => set({ wakeTime: v }),
       setSleepTime:(v) => set({ sleepTime: v }),
       setPreferences: (data) =>
@@ -293,7 +350,11 @@ export const useAppStore = create<AppState>()(
       },
       completeDailyReview: () => {
         const today = new Date().toISOString().split('T')[0];
-        set({ lastDailyReviewDate: today });
+        set({ lastDailyReviewDate: today, lastEndOfDayPromptDate: today });
+      },
+      dismissEndOfDayReview: () => {
+        const today = new Date().toISOString().split('T')[0];
+        set({ lastEndOfDayPromptDate: today });
       },
       setLastAuthPromptDate: (date) => set({ lastAuthPromptDate: date }),
       recordDayComplete: () => {
@@ -309,18 +370,25 @@ export const useAppStore = create<AppState>()(
         const today = new Date().toISOString().split('T')[0];
         const { scheduleDate } = useAppStore.getState();
         if (scheduleDate && scheduleDate !== today) {
-          set({ scheduleBlocks: [], completedTaskIds: [], scheduleDate: null });
+          set({ scheduleBlocks: [], completedTaskIds: [], skippedTaskIds: [], scheduleDate: null, lastScheduledTaskIds: [] });
         }
       },
       resetStore: () => set({
-        hasOnboarded:        false,
-        hasSeenWelcomeCard:  false,
-        onboardingData:      { procrastinationType: null, peakTime: null, coaching: null },
+        hasOnboarded:           false,
+        hasSeenWelcomeCard:     false,
+        hasConfirmedDayWindow:  false,
+        hasChosenCoachingStyle: false,
+        hasSeenSavePrompt:        false,
+        hasSeenTomorrowHook:      false,
+        tomorrowReminderEnabled:  false,
+        onboardingData:         { procrastinationType: null, peakTime: null, coaching: null },
         account:             { name: null, email: null, createdAt: null },
         tasks:               [],
         scheduleBlocks:      [],
         scheduleDate:        null,
+        lastScheduledTaskIds: [],
         completedTaskIds:    [],
+        skippedTaskIds:      [],
         wakeTime:            390,
         sleepTime:           1365,
         preferences:         { ...DEFAULT_PREFERENCES },
@@ -335,6 +403,7 @@ export const useAppStore = create<AppState>()(
         dailyGenerations:    0,
         lastGenerationDate:  null,
         lastDailyReviewDate: null,
+        lastEndOfDayPromptDate: null,
         lastAuthPromptDate:  null,
       }),
     }),
@@ -342,14 +411,21 @@ export const useAppStore = create<AppState>()(
       name: 'momentum-app-store',
       storage,
       partialize: (state) => ({
-        hasOnboarded:        state.hasOnboarded,
-        hasSeenWelcomeCard:  state.hasSeenWelcomeCard,
-        onboardingData:      state.onboardingData,
+        hasOnboarded:           state.hasOnboarded,
+        hasSeenWelcomeCard:     state.hasSeenWelcomeCard,
+        hasConfirmedDayWindow:  state.hasConfirmedDayWindow,
+        hasChosenCoachingStyle: state.hasChosenCoachingStyle,
+        hasSeenSavePrompt:        state.hasSeenSavePrompt,
+        hasSeenTomorrowHook:      state.hasSeenTomorrowHook,
+        tomorrowReminderEnabled:  state.tomorrowReminderEnabled,
+        onboardingData:         state.onboardingData,
         account:             state.account,
         tasks:               state.tasks,
         scheduleBlocks:      state.scheduleBlocks,
         scheduleDate:        state.scheduleDate,
+        lastScheduledTaskIds: state.lastScheduledTaskIds,
         completedTaskIds:    state.completedTaskIds,
+        skippedTaskIds:      state.skippedTaskIds,
         wakeTime:            state.wakeTime,
         sleepTime:           state.sleepTime,
         preferences:         state.preferences,
@@ -364,6 +440,7 @@ export const useAppStore = create<AppState>()(
         dailyGenerations:    state.dailyGenerations,
         lastGenerationDate:  state.lastGenerationDate,
         lastDailyReviewDate: state.lastDailyReviewDate,
+        lastEndOfDayPromptDate: state.lastEndOfDayPromptDate,
         lastAuthPromptDate:  state.lastAuthPromptDate,
       }),
       onRehydrateStorage: () => () => {

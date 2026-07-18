@@ -100,6 +100,62 @@ function detectBestFocusPeriod(events: TaskEventRow[], behavior: BehaviorProfile
   return `${best} (${max} completions logged)`;
 }
 
+function detectSkipReasonPatterns(events: TaskEventRow[]): ProcrastinationPattern[] {
+  const patterns: ProcrastinationPattern[] = [];
+  const skipEvents = events.filter((e) => e.event_type === 'task_skipped');
+  if (skipEvents.length < 2) return patterns;
+
+  const reasonCounts = new Map<string, number>();
+  for (const e of skipEvents) {
+    const reason = (e.metadata?.skip_reason as string | undefined) ?? 'other';
+    reasonCounts.set(reason, (reasonCounts.get(reason) ?? 0) + 1);
+  }
+
+  let topReason = 'other';
+  let topCount = 0;
+  for (const [reason, count] of reasonCounts) {
+    if (count > topCount) {
+      topCount = count;
+      topReason = reason;
+    }
+  }
+
+  if (topCount >= 2 && topReason !== 'other') {
+    const labels: Record<string, string> = {
+      distracted: 'Distraction-driven skips',
+      no_time: 'Time pressure skips',
+      low_energy: 'Low-energy skips',
+      priority_changed: 'Priority-shift skips',
+      underestimated: 'Underestimated duration',
+    };
+    patterns.push({
+      id: 'high_skip_rate',
+      label: labels[topReason] ?? 'Recurring skip pattern',
+      severity: topCount >= skipEvents.length * 0.5 ? 'high' : 'medium',
+      description: `Your most common skip reason lately is "${topReason.replace(/_/g, ' ')}".`,
+      evidence: `${topCount} of ${skipEvents.length} skips share this reason.`,
+    });
+  }
+
+  const skipByDay = new Map<string, number>();
+  for (const e of skipEvents) {
+    const day = isoDate(e.occurred_at);
+    skipByDay.set(day, (skipByDay.get(day) ?? 0) + 1);
+  }
+  const heavySkipDays = [...skipByDay.values()].filter((c) => c >= 2).length;
+  if (heavySkipDays >= 2) {
+    patterns.push({
+      id: 'failure_avoidance',
+      label: 'Skip-heavy days',
+      severity: 'medium',
+      description: 'Some days you skip multiple tasks instead of finishing one.',
+      evidence: `${heavySkipDays} days with 2+ skips in the last week.`,
+    });
+  }
+
+  return patterns;
+}
+
 function detectProcrastinationPatterns(
   events: TaskEventRow[],
   behavior: BehaviorProfile,
@@ -110,6 +166,8 @@ function detectProcrastinationPatterns(
   const created = events.filter((e) => e.event_type === 'task_created').length;
   const completed = events.filter((e) => e.event_type === 'task_completed').length;
   const avgLag = avgMinutesBetweenCreatedAndStarted(events);
+
+  patterns.push(...detectSkipReasonPatterns(events));
 
   if (skipped > 0 && skipped >= completed * 0.3) {
     patterns.push({
@@ -171,7 +229,21 @@ function detectProcrastinationPatterns(
     });
   }
 
-  return patterns;
+  const byId = new Map<string, ProcrastinationPattern>();
+  for (const p of patterns) {
+    const existing = byId.get(p.id);
+    if (!existing || severityRank(p.severity) > severityRank(existing.severity)) {
+      byId.set(p.id, p);
+    }
+  }
+
+  return [...byId.values()];
+}
+
+function severityRank(s: ProcrastinationPattern['severity']): number {
+  if (s === 'high') return 3;
+  if (s === 'medium') return 2;
+  return 1;
 }
 
 /** Generate full insights package from raw events + behavior profile. */

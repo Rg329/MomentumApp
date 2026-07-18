@@ -1,9 +1,26 @@
 import { Colors } from '../theme';
+import { useAppStore } from '../store/useAppStore';
 import type { CoachingContext } from './types';
 import type { DailyAnalytics } from './types';
 
 function computeMomentumScore(ctx: CoachingContext): number {
-  const { metrics } = ctx;
+  const { metrics, isSignedIn, localCompletedCount, localSkippedCount, pendingEventCount } = ctx;
+
+  if (!isSignedIn) {
+    const activity = localCompletedCount + localSkippedCount + pendingEventCount;
+    if (activity === 0 && ctx.localTasks.length === 0) return 0;
+    const localRate = localCompletedCount + localSkippedCount > 0
+      ? localCompletedCount / (localCompletedCount + localSkippedCount)
+      : 0.5;
+    return Math.max(
+      0,
+      Math.min(
+        100,
+        Math.round(25 + localRate * 35 + Math.min(localCompletedCount, 5) * 6 + Math.min(pendingEventCount, 5) * 2),
+      ),
+    );
+  }
+
   const rateScore = metrics.completionRate * 55;
   const streakScore = Math.min(metrics.currentStreak, 14) * 2.5;
   const volumeScore = Math.min(metrics.tasksCompleted, 25) * 1.2;
@@ -35,21 +52,31 @@ function scoreDelta(ctx: CoachingContext): number | null {
 export function computeDailyAnalytics(ctx: CoachingContext): DailyAnalytics {
   const score = computeMomentumScore(ctx);
   const delta = scoreDelta(ctx);
-  const { metrics } = ctx;
+  const { metrics, isSignedIn, localCompletedCount, localSkippedCount } = ctx;
+
+  const tasksCompleted = isSignedIn ? metrics.tasksCompleted : localCompletedCount;
+  const tasksSkipped = isSignedIn ? metrics.tasksSkipped : localSkippedCount;
+  const tasksRescheduled = metrics.tasksRescheduled;
+  const completionRatePct = isSignedIn
+    ? Math.round(metrics.completionRate * 100)
+    : (localCompletedCount + localSkippedCount > 0
+      ? Math.round((localCompletedCount / (localCompletedCount + localSkippedCount)) * 100)
+      : 0);
 
   const deepWorkMins = ctx.localTasks.reduce((s, t) => s + t.durationMinutes, 0);
   const breakMins = Math.max(0, ctx.scheduleBlockCount - ctx.localTasks.length) * 15;
   const total = deepWorkMins + breakMins || 1;
+  const localStreak = useAppStore.getState().currentStreak;
 
   return {
     momentumScore: score,
     scoreDelta: delta,
-    tasksCompleted: metrics.tasksCompleted,
-    tasksSkipped: metrics.tasksSkipped,
-    tasksRescheduled: metrics.tasksRescheduled,
-    completionRatePct: Math.round(metrics.completionRate * 100),
-    currentStreak: metrics.currentStreak,
-    bestStreak: metrics.bestStreak,
+    tasksCompleted,
+    tasksSkipped,
+    tasksRescheduled,
+    completionRatePct,
+    currentStreak: isSignedIn ? metrics.currentStreak : localStreak,
+    bestStreak: isSignedIn ? metrics.bestStreak : useAppStore.getState().longestStreak,
     timeDistribution: [
       {
         label: 'Deep Work',

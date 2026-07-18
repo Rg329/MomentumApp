@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   ScrollView,
   Animated,
-  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -21,6 +20,9 @@ import { usePremium, PREMIUM_COLOR } from '../monetization';
 import { useAppStore } from '../store/useAppStore';
 import { useBehavioralCoach, generateCoachingMessage } from '../coaching';
 import { LinearGradient } from 'expo-linear-gradient';
+import { SignInPromptSheet } from '../components/SignInPromptSheet';
+import { useAuthSession } from '../auth/useAuthSession';
+import { isSupabaseSignedIn } from '../auth/sessionUtils';
 
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
 
@@ -143,12 +145,76 @@ const bannerStyles = StyleSheet.create({
   arrow:    { width: 30, height: 30, borderRadius: 15, backgroundColor: PREMIUM_COLOR + '18', alignItems: 'center', justifyContent: 'center' },
 });
 
+function SignInSyncBanner({
+  pendingEventCount,
+  onSignIn,
+}: {
+  pendingEventCount: number;
+  onSignIn: () => void;
+}) {
+  return (
+    <TouchableOpacity style={signInBannerStyles.card} onPress={onSignIn} activeOpacity={0.88}>
+      <View style={signInBannerStyles.left}>
+        <View style={signInBannerStyles.iconWrap}>
+          <MaterialCommunityIcons name="cloud-sync-outline" size={20} color={Colors.primary} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={signInBannerStyles.title}>Sign in to save your progress</Text>
+          <Text style={signInBannerStyles.sub}>
+            {pendingEventCount > 0
+              ? `${pendingEventCount} check-in${pendingEventCount !== 1 ? 's' : ''} waiting to sync`
+              : 'Your coach gets smarter when behavior is backed up to your account.'}
+          </Text>
+        </View>
+      </View>
+      <View style={signInBannerStyles.arrow}>
+        <MaterialCommunityIcons name="chevron-right" size={18} color={Colors.primary} />
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+const signInBannerStyles = StyleSheet.create({
+  card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: Colors.primaryFixed + '55',
+    borderRadius: Radius.xl,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: Colors.primary + '28',
+  },
+  left: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  iconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: Colors.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  title: { fontFamily: 'Manrope_700Bold', fontSize: 14, color: Colors.onSurface },
+  sub: { fontFamily: 'Manrope_400Regular', fontSize: 12, color: Colors.onSurfaceVariant, marginTop: 2, lineHeight: 17 },
+  arrow: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: Colors.primary + '14',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+  },
+});
+
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export function DailySummaryScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const pm         = usePremium();
   const { completeDailyReview } = useAppStore();
   const coach = useBehavioralCoach('daily_summary');
+  const { isSignedIn, pendingEventCount } = useAuthSession();
+  const [showSignInPrompt, setShowSignInPrompt] = useState(false);
 
   const deepAnalysisPreview: string | undefined =
     coach.context && !pm.canUse('deep_insights')
@@ -192,28 +258,21 @@ export function DailySummaryScreen() {
 
   const scoreBarWidth = scoreBarAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] });
 
-  const handleComplete = () => {
+  const handleComplete = async () => {
     completeDailyReview();
 
     const today = new Date().toISOString().split('T')[0];
-    const { account, lastAuthPromptDate, setLastAuthPromptDate } = useAppStore.getState();
-    const alreadySignedIn = Boolean(account.email);
+    const { lastAuthPromptDate, setLastAuthPromptDate } = useAppStore.getState();
+    const signedIn = await isSupabaseSignedIn();
     const alreadyPrompted = lastAuthPromptDate === today;
 
     const navigateAfterReview = () => {
-      if (!alreadySignedIn && !alreadyPrompted) {
+      if (!signedIn && !alreadyPrompted) {
         setLastAuthPromptDate(today);
-        Alert.alert(
-          'Save your insights',
-          'Sign in to back up your progress and access it on any device.',
-          [
-            { text: 'Not now', style: 'cancel', onPress: () => navigation.navigate('Schedule' as any) },
-            { text: 'Sign In', onPress: () => navigation.navigate('Auth') },
-          ],
-        );
-      } else {
-        navigation.navigate('Schedule' as any);
+        setShowSignInPrompt(true);
+        return;
       }
+      navigation.navigate('Schedule' as any);
     };
 
     Animated.sequence([
@@ -241,6 +300,13 @@ export function DailySummaryScreen() {
             Straight talk based on what you actually do — not a personality quiz.
           </Text>
         </Animated.View>
+
+        {isSignedIn === false && (
+          <SignInSyncBanner
+            pendingEventCount={pendingEventCount}
+            onSignIn={() => navigation.navigate('Auth', { fromInsights: true })}
+          />
+        )}
 
         {/* ── FREE: Behavioral coaching (O-P-A) ── */}
         <CoachingCard coaching={coach.coaching} loading={coach.loading} />
@@ -348,6 +414,26 @@ export function DailySummaryScreen() {
             <View style={styles.weeklyCard}>
               <MaterialCommunityIcons name="text-box-check-outline" size={22} color={PREMIUM_COLOR} style={{ marginBottom: 6 }} />
               <Text style={styles.weeklyTitle}>{coach.weeklyReport?.weekLabel ?? 'Last 7 days'}</Text>
+              {coach.weeklyReport && (
+                <View style={styles.weeklyStatsRow}>
+                  <View style={styles.weeklyStat}>
+                    <Text style={styles.weeklyStatVal}>{coach.weeklyReport.totalCompleted}</Text>
+                    <Text style={styles.weeklyStatLbl}>Finished</Text>
+                  </View>
+                  <View style={styles.weeklyStat}>
+                    <Text style={styles.weeklyStatVal}>{coach.weeklyReport.weekCompletionPct}%</Text>
+                    <Text style={styles.weeklyStatLbl}>Completion</Text>
+                  </View>
+                  {coach.weeklyReport.strongestDay && (
+                    <View style={styles.weeklyStat}>
+                      <Text style={styles.weeklyStatVal} numberOfLines={1}>
+                        {coach.weeklyReport.strongestDay.slice(0, 3)}
+                      </Text>
+                      <Text style={styles.weeklyStatLbl}>Best day</Text>
+                    </View>
+                  )}
+                </View>
+              )}
               <PremiumCoachingCard
                 coaching={coach.context && pm.canUse('weekly_reflections')
                   ? generateCoachingMessage('weekly_report', coach.context, undefined, true)
@@ -408,6 +494,21 @@ export function DailySummaryScreen() {
         <MaterialCommunityIcons name="check-circle" size={16} color="#16a34a" />
         <Text style={styles.toastText}>Daily review saved.</Text>
       </Animated.View>
+
+      <SignInPromptSheet
+        visible={showSignInPrompt}
+        pendingEventCount={pendingEventCount}
+        title="Save your insights"
+        subtitle="Sign in to back up your progress and unlock coaching that learns from real behavior."
+        onContinue={() => {
+          setShowSignInPrompt(false);
+          navigation.navigate('Auth', { fromInsights: true });
+        }}
+        onSkip={() => {
+          setShowSignInPrompt(false);
+          navigation.navigate('Schedule' as any);
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -511,6 +612,19 @@ const styles = StyleSheet.create({
 
   weeklyCard: { backgroundColor: PREMIUM_COLOR + '0a', borderRadius: Radius.xl, padding: 18, borderWidth: 1, borderColor: PREMIUM_COLOR + '20' },
   weeklyTitle:{ fontFamily: 'Manrope_700Bold', fontSize: 14, color: PREMIUM_COLOR, marginBottom: 6 },
+  weeklyStatsRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
+  weeklyStat: {
+    flex: 1,
+    backgroundColor: Colors.background,
+    borderRadius: Radius.lg,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: PREMIUM_COLOR + '18',
+  },
+  weeklyStatVal: { fontFamily: 'Manrope_700Bold', fontSize: 16, color: Colors.onSurface },
+  weeklyStatLbl: { fontFamily: 'Manrope_500Medium', fontSize: 10, color: Colors.onSurfaceVariant, marginTop: 2 },
   weeklyBody: { fontFamily: 'Manrope_400Regular', fontSize: 13, color: Colors.onSurface, lineHeight: 20 },
 
   analyticsRow:{ flexDirection: 'row', gap: 8 },

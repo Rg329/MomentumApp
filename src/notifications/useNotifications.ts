@@ -22,12 +22,14 @@ import { NOTIFICATIONS_ENABLED } from './config';
  * schedules reminders, and handles notification taps (deep links).
  */
 export function useNotifications() {
-  const hasOnboarded     = useAppStore((s) => s.hasOnboarded);
-  const wakeTime         = useAppStore((s) => s.wakeTime);
-  const scheduleBlocks   = useAppStore((s) => s.scheduleBlocks);
-  const scheduleDate     = useAppStore((s) => s.scheduleDate);
-  const completedTaskIds = useAppStore((s) => s.completedTaskIds);
-  const permissionAsked  = useRef(false);
+  const hasOnboarded            = useAppStore((s) => s.hasOnboarded);
+  const wakeTime                = useAppStore((s) => s.wakeTime);
+  const scheduleBlocks          = useAppStore((s) => s.scheduleBlocks);
+  const scheduleDate            = useAppStore((s) => s.scheduleDate);
+  const completedTaskIds        = useAppStore((s) => s.completedTaskIds);
+  const tomorrowReminderEnabled = useAppStore((s) => s.tomorrowReminderEnabled);
+  const notificationStyle       = useAppStore((s) => s.preferences.notificationStyle);
+  const permissionAsked         = useRef(false);
 
   useEffect(() => {
     if (!NOTIFICATIONS_ENABLED || Platform.OS === 'web' || !hasOnboarded || permissionAsked.current) return;
@@ -39,26 +41,26 @@ export function useNotifications() {
         const granted = await requestNotificationPermissions();
         if (!granted) return;
         await setupNotificationCategories();
-        await scheduleMorningNotification(wakeTime);
       } catch {}
     })();
-  }, [hasOnboarded, wakeTime]);
+  }, [hasOnboarded]);
 
   useEffect(() => {
     if (!NOTIFICATIONS_ENABLED || !hasOnboarded) return;
-    scheduleMorningNotification(wakeTime).catch(() => {});
-  }, [hasOnboarded, wakeTime]);
+    scheduleMorningNotification(wakeTime, tomorrowReminderEnabled, notificationStyle).catch(() => {});
+  }, [hasOnboarded, wakeTime, tomorrowReminderEnabled, notificationStyle]);
 
   useEffect(() => {
     if (!NOTIFICATIONS_ENABLED || !hasOnboarded || scheduleBlocks.length === 0 || !scheduleDate) return;
 
-    scheduleTaskNotifications(scheduleBlocks, scheduleDate).catch(() => {});
+    scheduleTaskNotifications(scheduleBlocks, scheduleDate, notificationStyle).catch(() => {});
     scheduleMissedTaskNotifications(
       scheduleBlocks,
       scheduleDate,
       completedTaskIds,
+      notificationStyle,
     ).catch(() => {});
-  }, [hasOnboarded, scheduleBlocks, scheduleDate, completedTaskIds]);
+  }, [hasOnboarded, scheduleBlocks, scheduleDate, completedTaskIds, notificationStyle]);
 
   useEffect(() => {
     if (!NOTIFICATIONS_ENABLED || completedTaskIds.length === 0) return;

@@ -4,6 +4,7 @@ import { navigationRef } from '../navigation/navigationRef';
 import type { RootStackParamList } from '../navigation/RootNavigator';
 import { handleNotificationResponse } from './notificationService';
 import { NOTIFICATION_TYPES } from './notificationTypes';
+import { trackFunnelEvent } from '../analytics/funnelTracker';
 
 type NotificationData = Record<string, unknown>;
 
@@ -15,8 +16,25 @@ function asNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
+function taskCheckInParams(data: NotificationData): RootStackParamList['TaskCheckIn'] | null {
+  const taskId = asString(data.taskId);
+  const taskTitle = asString(data.taskTitle);
+  if (!taskId || !taskTitle) return null;
+
+  return {
+    taskId,
+    taskTitle,
+    taskDesc: asString(data.taskDesc),
+    scheduledTime: asString(data.scheduledTime),
+    durationMinutes: asNumber(data.durationMinutes),
+  };
+}
+
 /** Navigate to the screen implied by notification payload data. */
-export function navigateFromNotificationData(data: NotificationData | undefined): void {
+export function navigateFromNotificationData(
+  data: NotificationData | undefined,
+  options?: { autoShowSkip?: boolean },
+): void {
   if (!data?.type || !navigationRef.isReady()) return;
 
   const type = String(data.type);
@@ -27,32 +45,34 @@ export function navigateFromNotificationData(data: NotificationData | undefined)
   }
 
   if (type === NOTIFICATION_TYPES.TASK_REMINDER || type === NOTIFICATION_TYPES.MISSED_TASK) {
-    const taskId = asString(data.taskId);
-    const taskTitle = asString(data.taskTitle) ?? 'Task';
-    const taskDesc = asString(data.taskDesc);
-    const scheduledTime = asString(data.scheduledTime);
-    const durationMinutes = asNumber(data.durationMinutes);
-
-    const params: RootStackParamList['FocusMode'] = {
-      taskId,
-      taskTitle,
-      taskDesc,
-      scheduledTime,
-      durationMinutes,
-    };
-
-    navigationRef.navigate('FocusMode', params);
+    const params = taskCheckInParams(data);
+    if (!params) return;
+    navigationRef.navigate('TaskCheckIn', {
+      ...params,
+      autoShowSkip: options?.autoShowSkip ?? type === NOTIFICATION_TYPES.MISSED_TASK,
+    });
   }
 }
 
 /** Handle action buttons (e.g. Mark Complete) and default notification taps. */
 export function processNotificationResponse(response: NotificationResponse): void {
-  handleNotificationResponse(response);
+  const data = response.notification.request.content.data;
+  const handled = handleNotificationResponse(response);
+
+  if (handled) return;
 
   const isDefaultTap =
     response.actionIdentifier === Notifications.DEFAULT_ACTION_IDENTIFIER;
-  if (isDefaultTap) {
-    navigateFromNotificationData(response.notification.request.content.data);
+  const isSkipAction =
+    response.actionIdentifier === 'SKIP_CHECKIN';
+
+  if (isDefaultTap || isSkipAction) {
+    trackFunnelEvent('notification_opened', {
+      type: data?.type,
+      taskId: data?.taskId,
+      action: isSkipAction ? 'skip' : 'open',
+    });
+    navigateFromNotificationData(data, { autoShowSkip: isSkipAction });
   }
 }
 

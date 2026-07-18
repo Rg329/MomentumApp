@@ -26,3 +26,18 @@ export async function upsertMyProfile(patch: ProfileUpsert) {
 
   return supabase.from('profiles').upsert(payload, { onConflict: 'id' });
 }
+
+export type ProfileRow = ProfileUpsert & { id: string };
+
+export async function fetchMyProfile() {
+  if (!isSupabaseConfigured) return { data: null as ProfileRow | null, error: null };
+
+  const { data: auth } = await supabase.auth.getUser();
+  if (!auth.user) return { data: null, error: new Error('Not authenticated') };
+
+  return supabase
+    .from('profiles')
+    .select('id, name, email, procrastination_type, peak_time, coach_style, wake_time, sleep_time')
+    .eq('id', auth.user.id)
+    .maybeSingle();
+}

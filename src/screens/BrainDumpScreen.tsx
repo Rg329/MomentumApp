@@ -24,11 +24,14 @@ import { Colors, Typography, Spacing, Radius, Shadow } from '../theme';
 import { TopBar } from '../components/TopBar';
 import { WelcomeCard } from '../components/WelcomeCard';
 import { useAppStore, Task } from '../store/useAppStore';
+import { useRetentionMetrics } from '../hooks/useRetentionMetrics';
 import { usePersonalization } from '../personalization';
 import { usePremium, PREMIUM_COLOR } from '../monetization';
 import { PremiumBadge } from '../components/PremiumBadge';
 import { UpgradePrompt } from '../components/UpgradePrompt';
 import { DurationScrollPicker } from '../components/DurationScrollPicker';
+import { WakeSleepSheet } from '../components/WakeSleepSheet';
+import { getStarterTasks } from '../onboarding/starterTasks';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'BrainDump'>;
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
@@ -512,6 +515,19 @@ function PlanPreviewCard({ tasks, plannedMins, onPress }: {
     </TouchableOpacity>
   );
 }
+
+function NewTasksBanner({ count, onPress }: { count: number; onPress: () => void }) {
+  return (
+    <TouchableOpacity style={styles.newTasksBanner} onPress={onPress} activeOpacity={0.85}>
+      <MaterialCommunityIcons name="calendar-sync-outline" size={16} color={Colors.primary} />
+      <Text style={styles.newTasksBannerText}>
+        {count} new task{count !== 1 ? 's' : ''} — regenerate on Schedule to fit them in
+      </Text>
+      <MaterialCommunityIcons name="chevron-right" size={18} color={Colors.primary} />
+    </TouchableOpacity>
+  );
+}
+
 function TaskRow({ task, index, onRemove, onLongPress }: {
   task: Task; index: number; onRemove: () => void; onLongPress: () => void;
 }) {
@@ -551,11 +567,10 @@ function TaskRow({ task, index, onRemove, onLongPress }: {
 
 // ─── Streak Bar ───────────────────────────────────────────────────────────────
 function StreakBar({ navigation }: { navigation: Props['navigation'] }) {
-  const currentStreak = useAppStore((s) => s.currentStreak);
-  const longestStreak = useAppStore((s) => s.longestStreak);
-  const isPremium     = useAppStore((s) => s.isPremium);
-  const scale         = useRef(new Animated.Value(0.92)).current;
-  const opacity       = useRef(new Animated.Value(0)).current;
+  const { currentStreak, bestStreak, momentumScore } = useRetentionMetrics();
+  const isPremium = useAppStore((s) => s.isPremium);
+  const scale     = useRef(new Animated.Value(0.92)).current;
+  const opacity   = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Animated.parallel([
@@ -588,7 +603,7 @@ function StreakBar({ navigation }: { navigation: Props['navigation'] }) {
       <TouchableOpacity style={styles.streakItem} onPress={handlePress} activeOpacity={isPremium ? 1 : 0.75}>
         {isPremium ? (
           <>
-            <Text style={styles.streakNumber}>{longestStreak}</Text>
+            <Text style={styles.streakNumber}>{bestStreak}</Text>
             <Text style={styles.streakLabel}>Best Streak</Text>
           </>
         ) : (
@@ -610,7 +625,7 @@ function StreakBar({ navigation }: { navigation: Props['navigation'] }) {
       <TouchableOpacity style={styles.streakItem} onPress={handlePress} activeOpacity={isPremium ? 1 : 0.75}>
         {isPremium ? (
           <>
-            <Text style={styles.streakNumber}>{Math.min(99, currentStreak * 7)}</Text>
+            <Text style={styles.streakNumber}>{momentumScore}</Text>
             <Text style={styles.streakLabel}>Momentum</Text>
           </>
         ) : (
@@ -631,20 +646,14 @@ function StreakBar({ navigation }: { navigation: Props['navigation'] }) {
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export function BrainDumpScreen({ navigation }: Props) {
-  const { tasks, addTask, updateTask, removeTask, wakeTime, sleepTime, hasSeenWelcomeCard, dismissWelcomeCard, incrementGeneration, scheduleBlocks } = useAppStore();
+  const {
+    tasks, addTask, updateTask, removeTask, wakeTime, sleepTime, setWakeTime, setSleepTime,
+    hasSeenWelcomeCard, dismissWelcomeCard, incrementGeneration, scheduleBlocks, scheduleDate,
+    lastScheduledTaskIds,
+    hasConfirmedDayWindow, confirmDayWindow,
+  } = useAppStore();
   const procrastinationType = useAppStore((s) => s.onboardingData.procrastinationType);
-
-  const SUGGESTIONS_BY_TYPE: Record<string, string[]> = {
-    overwhelmed_tasks:  ['Reply to 3 emails', 'Write one paragraph', '10-min tidy up', 'Check one item off', 'Review your notes'],
-    waiting_motivation: ['Set a 10-min timer and start', 'Write the first sentence', 'Open the file', 'Do the easiest part first', 'Commit to 5 minutes'],
-    dont_know_start:    ['Write down step 1', 'Find one resource', 'Sketch an outline', 'Define done in one sentence', 'Ask one clarifying question'],
-    easily_distracted:  ['25-min Pomodoro block', 'Phone in another room', 'Single-tab browser session', 'Headphones on, notifications off', 'One task until timer ends'],
-    changing_plans:     ['Lock in 3 tasks for today', 'No rescheduling before noon', 'Finish one before adding another', 'Write a 2-line plan', 'Pick one anchor task'],
-    underestimate_time: ['Buffer this task by 50%', 'Set a hard stop time', 'Break into 3 steps', 'Track time on one task', 'Stop at the timer — not when done'],
-  };
-
-  const SUGGESTIONS = SUGGESTIONS_BY_TYPE[procrastinationType ?? '']
-    ?? ['Deep work block', 'Admin tasks', 'Planning session', 'Email catch-up', 'Review & reflect'];
+  const starterTasks = getStarterTasks(procrastinationType);
 
   const pm = usePremium();
   const [showUpgradePrompt, setShowUpgradePrompt] = useState(false);
@@ -653,12 +662,27 @@ export function BrainDumpScreen({ navigation }: Props) {
   const [showModal, setShowModal] = useState(false);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [loading, setLoading]     = useState(false);
+  const [showWakeSleepSheet, setShowWakeSleepSheet] = useState(false);
   const buttonScale  = useRef(new Animated.Value(1)).current;
   const addBtnScale  = useRef(new Animated.Value(1)).current;
   const heroFade     = useRef(new Animated.Value(0)).current;
   const heroSlide    = useRef(new Animated.Value(20)).current;
 
   const hasTasks      = tasks.length > 0;
+  const today         = new Date().toISOString().split('T')[0];
+  const hasActiveSchedule =
+    scheduleBlocks.length > 0 && scheduleDate === today;
+  const newTasksSincePlan = tasks.filter((t) => !lastScheduledTaskIds.includes(t.id));
+  const isPlanningMode  = !hasActiveSchedule;
+
+  const goToSchedule = () => {
+    const routeNames = (navigation.getState()?.routeNames ?? []) as string[];
+    if (routeNames.includes('Schedule')) {
+      (navigation as { navigate: (name: 'Schedule') => void }).navigate('Schedule');
+    } else {
+      navigation.navigate('MainTabs', { screen: 'Schedule' });
+    }
+  };
   // Personalized greeting + quote
   const greeting      = p.dashboardGreeting;
   const subtext       = p.dashboardSubtext;
@@ -668,9 +692,49 @@ export function BrainDumpScreen({ navigation }: Props) {
   const awakeMins     = Math.max(0, sleepTime - wakeTime);
   const availableMins = Math.max(0, awakeMins - 120);
 
-  const suggestionsToShow = SUGGESTIONS
+  const suggestionsToShow = starterTasks
+    .map((t) => t.text)
     .filter((s) => !tasks.find((t) => t.text.toLowerCase() === s.toLowerCase()))
     .slice(0, 3);
+
+  const useStarterTasks = () => {
+    starterTasks.forEach((t) => {
+      if (!tasks.find((existing) => existing.text.toLowerCase() === t.text.toLowerCase())) {
+        addTask(t.text, t.durationMinutes);
+      }
+    });
+  };
+
+  const proceedToGenerate = () => {
+    setLoading(true);
+    incrementGeneration();
+    Animated.sequence([
+      Animated.timing(buttonScale, { toValue: 0.96, duration: 100, useNativeDriver: true }),
+      Animated.timing(buttonScale, { toValue: 1,    duration: 100, useNativeDriver: true }),
+    ]).start(() => setTimeout(() => {
+      setLoading(false);
+      navigation.navigate('Constraints');
+    }, 700));
+  };
+
+  const handleGenerate = () => {
+    if (!hasTasks) return;
+    if (pm.generationsExhausted) {
+      setShowUpgradePrompt(true);
+      return;
+    }
+    if (!hasConfirmedDayWindow) {
+      setShowWakeSleepSheet(true);
+      return;
+    }
+    proceedToGenerate();
+  };
+
+  const handleWakeSleepConfirm = () => {
+    confirmDayWindow();
+    setShowWakeSleepSheet(false);
+    proceedToGenerate();
+  };
 
   useEffect(() => {
     Animated.parallel([
@@ -701,20 +765,6 @@ export function BrainDumpScreen({ navigation }: Props) {
     }
   };
 
-  const handleGenerate = () => {
-    if (!hasTasks) return;
-    if (pm.generationsExhausted) {
-      setShowUpgradePrompt(true);
-      return;
-    }
-    setLoading(true);
-    incrementGeneration();
-    Animated.sequence([
-      Animated.timing(buttonScale, { toValue: 0.96, duration: 100, useNativeDriver: true }),
-      Animated.timing(buttonScale, { toValue: 1,    duration: 100, useNativeDriver: true }),
-    ]).start(() => setTimeout(() => { setLoading(false); navigation.navigate('Constraints'); }, 700));
-  };
-
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <TopBar />
@@ -742,16 +792,33 @@ export function BrainDumpScreen({ navigation }: Props) {
                 />
                 <Text style={styles.greetingText}>{greeting}</Text>
               </View>
-              <Text style={styles.heroTitle}>
-                What's on your{'\n'}<Text style={styles.heroTitleAccent}>mind today?</Text>
-              </Text>
+              {hasActiveSchedule ? (
+                <Text style={styles.heroTitle}>
+                  Today's plan is{'\n'}
+                  <Text style={styles.heroTitleAccent}>ready.</Text>
+                </Text>
+              ) : hasTasks ? (
+                <Text style={styles.heroTitle}>
+                  What's on your{'\n'}
+                  <Text style={styles.heroTitleAccent}>mind today?</Text>
+                </Text>
+              ) : (
+                <Text style={styles.heroTitle}>
+                  Let's plan the{'\n'}
+                  <Text style={styles.heroTitleAccent}>next few hours.</Text>
+                </Text>
+              )}
             </View>
           </View>
 
           {/* Subtle motivational line */}
           <View style={styles.motivationRow}>
             <View style={styles.motivationAccent} />
-            <Text style={styles.motivationText} numberOfLines={1}>{motivation}</Text>
+            <Text style={styles.motivationText} numberOfLines={1}>
+              {hasActiveSchedule
+                ? 'View your timeline on Schedule — regenerate there if you add tasks.'
+                : motivation}
+            </Text>
           </View>
         </Animated.View>
 
@@ -769,26 +836,71 @@ export function BrainDumpScreen({ navigation }: Props) {
           keyboardShouldPersistTaps="handled"
           onScrollBeginDrag={Keyboard.dismiss}
           ListHeaderComponent={
-            !hasSeenWelcomeCard ? (
-              <WelcomeCard
-                coachStyle={p.profile.coachStyle}
-                onDismiss={dismissWelcomeCard}
-              />
-            ) : null
+            <>
+              {!hasSeenWelcomeCard && isPlanningMode ? (
+                <WelcomeCard
+                  coachStyle={p.profile.coachStyle}
+                  onDismiss={dismissWelcomeCard}
+                />
+              ) : null}
+              {hasActiveSchedule ? (
+                <View style={{ gap: 10, marginBottom: hasTasks ? 4 : 0 }}>
+                  <PlanPreviewCard
+                    tasks={tasks}
+                    plannedMins={plannedMins}
+                    onPress={goToSchedule}
+                  />
+                  {newTasksSincePlan.length > 0 && (
+                    <NewTasksBanner count={newTasksSincePlan.length} onPress={goToSchedule} />
+                  )}
+                  {hasTasks ? (
+                    <Text style={styles.sectionLabel}>Add more to today</Text>
+                  ) : null}
+                </View>
+              ) : null}
+            </>
           }
           ListEmptyComponent={
+            hasActiveSchedule ? (
+              <View style={styles.emptyState}>
+                <PulseIcon icon="plus-circle-outline" />
+                <View style={{ alignItems: 'center', gap: 6 }}>
+                  <Text style={styles.emptyTitle}>Anything else for today?</Text>
+                  <Text style={styles.emptySubtitle}>
+                    Tap Add more below. When you're ready, regenerate on the Schedule tab.
+                  </Text>
+                </View>
+                <View style={styles.suggestions}>
+                  {suggestionsToShow.map((s) => (
+                    <TouchableOpacity key={s} style={styles.suggestionChip} onPress={() => addTask(s, 30)} activeOpacity={0.7}>
+                      <MaterialCommunityIcons name="plus" size={13} color={Colors.primary} />
+                      <Text style={styles.suggestionText}>{s}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            ) : (
             <View style={styles.emptyState}>
               <PulseIcon icon="playlist-edit" />
               <View style={{ alignItems: 'center', gap: 6 }}>
-                {p.emptyStateMessage.split('\n').map((line, i) => (
-                  <Text key={i} style={i === 0 ? styles.emptyTitle : styles.emptyTitleAccent}>
-                    {line}
-                  </Text>
-                ))}
+                <Text style={styles.emptyTitle}>Pick a few things to tackle</Text>
                 <Text style={styles.emptySubtitle}>
-                  {p.coaching.addFirstTask}
+                  Tap suggestions below — or use all three to get started fast.
                 </Text>
               </View>
+              <View style={styles.starterPreview}>
+                {starterTasks.map((t) => (
+                  <View key={t.text} style={styles.starterRow}>
+                    <MaterialCommunityIcons name="checkbox-blank-circle-outline" size={14} color={Colors.primary} />
+                    <Text style={styles.starterRowText}>{t.text}</Text>
+                    <Text style={styles.starterRowMins}>{t.durationMinutes}m</Text>
+                  </View>
+                ))}
+              </View>
+              <TouchableOpacity style={styles.useStarterBtn} onPress={useStarterTasks} activeOpacity={0.88}>
+                <MaterialCommunityIcons name="lightning-bolt" size={16} color={Colors.onPrimary} />
+                <Text style={styles.useStarterLabel}>Use these 3</Text>
+              </TouchableOpacity>
               <View style={styles.suggestions}>
                 {suggestionsToShow.map((s) => (
                   <TouchableOpacity key={s} style={styles.suggestionChip} onPress={() => addTask(s, 30)} activeOpacity={0.7}>
@@ -798,13 +910,21 @@ export function BrainDumpScreen({ navigation }: Props) {
                 ))}
               </View>
             </View>
+            )
           }
           ListFooterComponent={
-            hasTasks ? (
+            hasTasks && isPlanningMode ? (
               <View style={{ gap: 10, marginTop: 4 }}>
-                {tasks.length >= 2 && <CapacityCard plannedMins={plannedMins} availableMins={availableMins} />}
-                {scheduleBlocks.length > 0 && (
-                  <PlanPreviewCard tasks={tasks} plannedMins={plannedMins} onPress={() => navigation.navigate('MainTabs', { screen: 'Schedule' })} />
+                {tasks.length >= 2 && hasConfirmedDayWindow && (
+                  <CapacityCard plannedMins={plannedMins} availableMins={availableMins} />
+                )}
+                {tasks.length >= 2 && !hasConfirmedDayWindow && (
+                  <View style={styles.capacityPlaceholder}>
+                    <MaterialCommunityIcons name="clock-outline" size={16} color={Colors.primary} />
+                    <Text style={styles.capacityPlaceholderText}>
+                      Available time appears after you set wake & sleep — tap Build my plan.
+                    </Text>
+                  </View>
                 )}
               </View>
             ) : null
@@ -835,10 +955,9 @@ export function BrainDumpScreen({ navigation }: Props) {
         />
 
         {!showModal && <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-          {/* Add Task button */}
           <Animated.View style={{ transform: [{ scale: addBtnScale }] }}>
             <TouchableOpacity
-              style={styles.addBtn}
+              style={[styles.addBtn, hasActiveSchedule && styles.addBtnCompact]}
               onPress={openNewTaskModal}
               activeOpacity={1}
               onPressIn={() => Animated.spring(addBtnScale, { toValue: 0.92, useNativeDriver: true, tension: 400, friction: 8 }).start()}
@@ -850,11 +969,11 @@ export function BrainDumpScreen({ navigation }: Props) {
               <View style={styles.addBtnIcon}>
                 <MaterialCommunityIcons name="plus" size={15} color={Colors.onPrimary} />
               </View>
-              <Text style={styles.addBtnLabel}>Add Task</Text>
+              <Text style={styles.addBtnLabel}>{hasActiveSchedule ? 'Add more' : 'Add Task'}</Text>
             </TouchableOpacity>
           </Animated.View>
 
-          {/* Generate button */}
+          {isPlanningMode ? (
           <Animated.View style={[{ flex: 1 }, { transform: [{ scale: buttonScale }] }]}>
             <TouchableOpacity
               style={[styles.generateBtn, !hasTasks && styles.generateBtnDisabled, pm.generationsExhausted && styles.generateBtnGated]}
@@ -876,9 +995,7 @@ export function BrainDumpScreen({ navigation }: Props) {
                 </>
               ) : (
                 <>
-                  <Text style={styles.generateBtnLabel} numberOfLines={1}>
-                    {hasTasks ? `Generate (${tasks.length})` : 'Generate My Day'}
-                  </Text>
+                  <Text style={styles.generateBtnLabel} numberOfLines={1}>Build my plan</Text>
                   {hasTasks && (
                     <MaterialCommunityIcons name="arrow-right" size={17} color={Colors.onPrimary} />
                   )}
@@ -892,6 +1009,24 @@ export function BrainDumpScreen({ navigation }: Props) {
               <View style={styles.ctaShine} pointerEvents="none" />
             </TouchableOpacity>
           </Animated.View>
+          ) : (
+          <Animated.View style={[{ flex: 1 }, { transform: [{ scale: buttonScale }] }]}>
+            <TouchableOpacity
+              style={styles.generateBtn}
+              onPress={goToSchedule}
+              activeOpacity={1}
+              onPressIn={() => Animated.spring(buttonScale, { toValue: 0.96, useNativeDriver: true, tension: 400, friction: 8 }).start()}
+              onPressOut={() => Animated.sequence([
+                Animated.spring(buttonScale, { toValue: 1.02, useNativeDriver: true, tension: 400, friction: 6 }),
+                Animated.spring(buttonScale, { toValue: 1,    useNativeDriver: true, tension: 300, friction: 8 }),
+              ]).start()}
+            >
+              <Text style={styles.generateBtnLabel} numberOfLines={1}>View schedule</Text>
+              <MaterialCommunityIcons name="arrow-right" size={17} color={Colors.onPrimary} />
+              <View style={styles.ctaShine} pointerEvents="none" />
+            </TouchableOpacity>
+          </Animated.View>
+          )}
         </View>}
       </View>
 
@@ -899,6 +1034,16 @@ export function BrainDumpScreen({ navigation }: Props) {
         visible={showUpgradePrompt}
         featureId="schedule_regeneration"
         onDismiss={() => setShowUpgradePrompt(false)}
+      />
+
+      <WakeSleepSheet
+        visible={showWakeSleepSheet}
+        wakeTime={wakeTime}
+        sleepTime={sleepTime}
+        onWakeTimeChange={setWakeTime}
+        onSleepTimeChange={setSleepTime}
+        onConfirm={handleWakeSleepConfirm}
+        onDismiss={() => setShowWakeSleepSheet(false)}
       />
     </SafeAreaView>
   );
@@ -1076,6 +1221,35 @@ const styles = StyleSheet.create({
   emptyTitleAccent: { fontFamily: 'Manrope_700Bold', color: Colors.primary, fontSize: 15, textAlign: 'center', marginTop: -2 },
   emptySubtitle: { fontFamily: 'Manrope_400Regular', color: Colors.onSurfaceVariant, textAlign: 'center', maxWidth: 270, lineHeight: 22, fontSize: 13, marginTop: 4 },
 
+  starterPreview: {
+    width: '100%',
+    backgroundColor: Colors.surfaceContainerLowest,
+    borderRadius: Radius.lg,
+    padding: 14,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: Colors.outlineVariant + '30',
+  },
+  starterRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  starterRowText: { flex: 1, fontFamily: 'Manrope_500Medium', fontSize: 13, color: Colors.onSurface },
+  starterRowMins: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, color: Colors.primary },
+  useStarterBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    borderRadius: Radius.full,
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.22,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  useStarterLabel: { fontFamily: 'Manrope_700Bold', fontSize: 15, color: Colors.onPrimary },
+
   suggestions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center' },
   suggestionChip: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
@@ -1152,6 +1326,36 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center',
   },
   addBtnLabel: { fontFamily: 'Manrope_600SemiBold', color: Colors.primary, fontSize: 13 },
+  addBtnCompact: {
+    paddingHorizontal: 14,
+    paddingVertical: 15,
+  },
+  sectionLabel: {
+    fontFamily: 'Manrope_600SemiBold',
+    fontSize: 11,
+    color: Colors.onSurfaceVariant,
+    textTransform: 'uppercase',
+    letterSpacing: 1.1,
+    marginTop: 2,
+  },
+  newTasksBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: Colors.primaryFixed + '90',
+    borderRadius: Radius.lg,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: Colors.primary + '22',
+  },
+  newTasksBannerText: {
+    flex: 1,
+    fontFamily: 'Manrope_500Medium',
+    fontSize: 13,
+    lineHeight: 18,
+    color: Colors.primary,
+  },
   generateBtn: {
     flex: 1, backgroundColor: Colors.primary,
     paddingVertical: 15, borderRadius: Radius.xl,
@@ -1176,7 +1380,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalBackdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0,0,0,0.4)',
   },
   modalKav: {
@@ -1431,6 +1635,24 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: Colors.outlineVariant + '28',
     gap: 12,
     shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.04, shadowRadius: 8, elevation: 2,
+  },
+  capacityPlaceholder: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: Colors.primaryFixed + '80',
+    borderRadius: Radius.lg,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: Colors.primary + '20',
+  },
+  capacityPlaceholderText: {
+    flex: 1,
+    fontFamily: 'Manrope_500Medium',
+    fontSize: 13,
+    lineHeight: 18,
+    color: Colors.onSurfaceVariant,
   },
   capacityHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   capacityBadge: {

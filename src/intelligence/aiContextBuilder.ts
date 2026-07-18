@@ -6,6 +6,8 @@ import { generateBehaviorProfile } from '../personalization/behaviorProfile';
 import { fetchRecentTaskEvents } from '../repositories/taskEventsRepo';
 import { fetchUserMetrics } from '../repositories/userMetricsRepo';
 import { fetchCachedUserInsights, refreshUserInsights } from '../repositories/insightsRepo';
+import { getPendingEvents } from './localEventQueue';
+import { computeMetricsFromEvents, mergeEventSources } from './eventAggregation';
 import { generateInsights } from './insightsEngine';
 import type {
   AICoachingContext,
@@ -83,7 +85,7 @@ function buildCoachingDirectives(
 
 /**
  * Build the complete AI coaching context from local profile + Supabase behavioral data.
- * Falls back to locally computed insights when cloud cache is empty.
+ * Merges queued local events so unsigned users still get behavioral coaching.
  */
 export async function buildAICoachingContext(): Promise<AICoachingContext> {
   const onboarding = buildOnboardingSnapshot();
@@ -95,15 +97,26 @@ export async function buildAICoachingContext(): Promise<AICoachingContext> {
     coachStyle: onboarding.coachStyle,
   });
 
-  const { data: events } = await fetchRecentTaskEvents(200, 30);
-  const { data: metrics } = await fetchUserMetrics();
+  const [{ data: cloudEvents }, pendingEvents] = await Promise.all([
+    fetchRecentTaskEvents(200, 30),
+    getPendingEvents(),
+  ]);
+
+  const events = mergeEventSources(cloudEvents, pendingEvents);
+  const { data: cloudMetrics } = await fetchUserMetrics();
+  const derivedMetrics = computeMetricsFromEvents(events);
+
+  const metrics =
+    cloudMetrics && cloudMetrics.tasksCompleted + cloudMetrics.tasksSkipped > 0
+      ? cloudMetrics
+      : derivedMetrics.tasksCompleted + derivedMetrics.tasksSkipped > 0
+        ? derivedMetrics
+        : cloudMetrics ?? { ...EMPTY_USER_METRICS };
 
   let insights: UserInsights;
   const { data: cached } = await fetchCachedUserInsights();
 
-  if (cached && events.length === 0) {
-    insights = cached;
-  } else if (events.length > 0) {
+  if (events.length > 0) {
     const { data: refreshed } = await refreshUserInsights(events, behaviorProfile);
     insights = refreshed;
   } else if (cached) {
@@ -116,7 +129,7 @@ export async function buildAICoachingContext(): Promise<AICoachingContext> {
     generatedAt: new Date().toISOString(),
     onboardingProfile: onboarding,
     behaviorProfile,
-    metrics: metrics ?? { ...EMPTY_USER_METRICS },
+    metrics,
     insights,
     recentTaskHistory: buildRecentTaskHistory(events),
     coachingDirectives: buildCoachingDirectives(onboarding, insights),

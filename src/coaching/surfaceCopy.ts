@@ -177,9 +177,15 @@ function buildPatternAnalysis(ctx: CoachingContext): CoachingMessage {
   const a = ranked[0];
   const b = ranked[1];
 
-  const observation = ctx.metrics.tasksSkipped > 0
-    ? `You skipped ${ctx.metrics.tasksSkipped} task${ctx.metrics.tasksSkipped === 1 ? '' : 's'} recently — I'm watching what triggers that.`
-    : `You finished ${ctx.metrics.tasksCompleted} tasks with few skips — your follow-through is solid.`;
+  const skipPattern = ctx.insights.procrastinationPatterns.find(
+    (p) => p.evidence.includes('skip reason') || p.label.toLowerCase().includes('skip'),
+  );
+
+  const observation = skipPattern
+    ? skipPattern.description
+    : ctx.metrics.tasksSkipped > 0
+      ? `You skipped ${ctx.metrics.tasksSkipped} task${ctx.metrics.tasksSkipped === 1 ? '' : 's'} recently — I'm watching what triggers that.`
+      : `You finished ${ctx.metrics.tasksCompleted} tasks with few skips — your follow-through is solid.`;
 
   const pattern = a !== b
     ? `${PATTERN_PLAIN[a]} Also: ${(PATTERN_PLAIN[b] ?? '').charAt(0).toLowerCase()}${(PATTERN_PLAIN[b] ?? '').slice(1)}`
@@ -231,8 +237,11 @@ function buildScheduleBanner(ctx: CoachingContext): CoachingMessage {
 
   const hardest = hardestTaskTitle(ctx);
   const signal = primarySignal(ctx);
-  const observation = PATTERN_PLAIN[signal] ?? '';
-  const action = SCHEDULE_BANNER_ACTION(hardest);
+  const observation = PATTERN_PLAIN[signal] ?? PATTERN_PLAIN.healthy_rhythm;
+  const action = injectTask(
+    ACTION_BY_SIGNAL[signal] ?? SCHEDULE_BANNER_ACTION(hardest),
+    hardest,
+  );
 
   return msg(observation, '', action, ctx);
 }

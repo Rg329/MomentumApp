@@ -39,7 +39,7 @@ export function CredentialsScreen({ navigation }: Props) {
       createdAt: account.createdAt ?? new Date().toISOString(),
     });
     syncOnboardingProfileToSupabase();
-    navigation.replace('MainTabs', { screen: 'Schedule' });
+    navigation.replace('MainTabs', { screen: 'Focus' });
   };
 
   return (

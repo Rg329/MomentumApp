@@ -7,6 +7,7 @@ import { ConstraintsScreen } from '../screens/ConstraintsScreen';
 import { AIAnalysisScreen } from '../screens/AIAnalysisScreen';
 import { OverloadAlertScreen } from '../screens/OverloadAlertScreen';
 import { FocusModeScreen } from '../screens/FocusModeScreen';
+import { TaskCheckInScreen } from '../screens/TaskCheckInScreen';
 import { PremiumScreen } from '../screens/PremiumScreen';
 import { CredentialsScreen } from '../screens/CredentialsScreen';
 import { ProOfferScreen } from '../screens/ProOfferScreen';
@@ -16,7 +17,7 @@ import { TabNavigator } from './TabNavigator';
 export type RootStackParamList = {
   Splash:       undefined;
   Onboarding:   undefined;
-  Auth:         undefined;
+  Auth:         { fromSavePrompt?: boolean; fromCheckIn?: boolean; fromInsights?: boolean } | undefined;
   Credentials:  undefined;
   ProOffer:     { fromOnboarding?: boolean } | undefined;
   BrainDump:    undefined;
@@ -27,6 +28,14 @@ export type RootStackParamList = {
     scheduledCount: number;
   };
   FocusMode:    { taskId?: string; taskTitle?: string; taskDesc?: string; durationMinutes?: number; scheduledTime?: string } | undefined;
+  TaskCheckIn:  {
+    taskId: string;
+    taskTitle: string;
+    taskDesc?: string;
+    durationMinutes?: number;
+    scheduledTime?: string;
+    autoShowSkip?: boolean;
+  };
   Premium:      undefined;
   MainTabs:     { screen?: 'Focus' | 'Schedule' | 'Insights' | 'Settings' } | undefined;
 };
@@ -52,6 +61,7 @@ export function RootNavigator() {
       <Stack.Screen name="AIAnalysis"    component={AIAnalysisScreen} />
       <Stack.Screen name="OverloadAlert" component={OverloadAlertScreen} />
       <Stack.Screen name="FocusMode"     component={FocusModeScreen} />
+      <Stack.Screen name="TaskCheckIn"   component={TaskCheckInScreen} />
       <Stack.Screen name="Premium"       component={PremiumScreen} options={{ animation: 'slide_from_bottom' }} />
       <Stack.Screen name="MainTabs"      component={TabNavigator} />
     </Stack.Navigator>

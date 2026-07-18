@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect, useRef } from 'react';
+import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -17,11 +17,21 @@ import { usePersonalization } from '../personalization';
 import { ScheduleBlock } from '../data/mockData';
 import { useAppStore } from '../store/useAppStore';
 import { useBehavioralCoach } from '../coaching';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/RootNavigator';
 import { usePremium } from '../monetization';
 import { FREE_GENERATION_LIMIT } from '../monetization/features';
+import { TomorrowHookSheet } from '../components/TomorrowHookSheet';
+import { DayReviewSheet } from '../components/DayReviewSheet';
+import { formatPeakWindowLabel } from '../onboarding/tomorrowHookUtils';
+import { minutesToDisplayTime } from '../utils/formatTime';
+import { isEndOfDayWindow, todayIso } from '../utils/dayWindow';
+import { trackFunnelEvent } from '../analytics/funnelTracker';
+import {
+  ensureNotificationPermissionsIfEnabled,
+  scheduleTomorrowReminderIfEnabled,
+} from '../notifications/safeEntry';
 
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
 
@@ -51,7 +61,12 @@ function nowMinutes(): number {
   return d.getHours() * 60 + d.getMinutes();
 }
 
-function TimeBlockItem({ block, onPress }: { block: ScheduleBlock; onPress: () => void }) {
+function TimeBlockItem({ block, onPress, isCompleted, isSkipped }: {
+  block: ScheduleBlock;
+  onPress: () => void;
+  isCompleted?: boolean;
+  isSkipped?: boolean;
+}) {
   const accentColor = BLOCK_COLORS[block.type] ?? Colors.primary;
   const iconName: IconName = BLOCK_ICONS[block.type] ?? 'circle';
 
@@ -90,24 +105,46 @@ function TimeBlockItem({ block, onPress }: { block: ScheduleBlock; onPress: () =
   }
 
   // ── Standard task block ────────────────────────────────────────────────────
+  const dimmed = isCompleted || isSkipped;
+
   return (
     <TouchableOpacity
       onPress={onPress}
       activeOpacity={0.82}
-      style={[styles.taskBlock, { borderLeftColor: accentColor, backgroundColor: accentColor + '07' }]}
+      style={[
+        styles.taskBlock,
+        { borderLeftColor: accentColor, backgroundColor: accentColor + '07' },
+        dimmed && styles.taskBlockDimmed,
+        isCompleted && styles.taskBlockDone,
+        isSkipped && styles.taskBlockSkipped,
+      ]}
     >
       {/* Subtle decorative orb top-right */}
       <View style={[styles.taskOrb, { backgroundColor: accentColor + '14' }]} />
 
       <View style={styles.taskHeader}>
         <Text style={[styles.taskType, { color: accentColor }]}>{block.label}</Text>
-        <View style={[styles.taskIconBubble, { backgroundColor: accentColor + '18' }]}>
-          <MaterialCommunityIcons name={iconName} size={13} color={accentColor} />
+        <View style={styles.taskHeaderRight}>
+          {isCompleted ? (
+            <View style={styles.stateBadgeDone}>
+              <MaterialCommunityIcons name="check" size={11} color="#16a34a" />
+              <Text style={styles.stateBadgeDoneText}>Done</Text>
+            </View>
+          ) : isSkipped ? (
+            <View style={styles.stateBadgeSkipped}>
+              <MaterialCommunityIcons name="minus-circle-outline" size={11} color={Colors.outline} />
+              <Text style={styles.stateBadgeSkippedText}>Skipped</Text>
+            </View>
+          ) : (
+            <View style={[styles.taskIconBubble, { backgroundColor: accentColor + '18' }]}>
+              <MaterialCommunityIcons name={iconName} size={13} color={accentColor} />
+            </View>
+          )}
         </View>
       </View>
 
-      <Text style={styles.taskTitle}>{block.title}</Text>
-      <Text style={styles.taskDesc} numberOfLines={2}>{block.description}</Text>
+      <Text style={[styles.taskTitle, dimmed && styles.taskTitleDimmed]}>{block.title}</Text>
+      <Text style={[styles.taskDesc, dimmed && styles.taskDescDimmed]} numberOfLines={2}>{block.description}</Text>
 
       {(block.duration || block.tag) ? (
         <View style={styles.taskMeta}>
@@ -202,7 +239,7 @@ export function DailyScheduleScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const p   = usePersonalization();
   const pm  = usePremium();
-  const { scheduleBlocks, tasks, completedTaskIds, clearDayData, removeTask, dailyGenerations, lastGenerationDate, incrementGeneration } = useAppStore();
+  const { scheduleBlocks, tasks, completedTaskIds, skippedTaskIds, clearDayData, removeTask, dailyGenerations, lastGenerationDate, incrementGeneration, hasSeenTomorrowHook, acceptTomorrowReminder, declineTomorrowReminder, wakeTime, sleepTime, lastEndOfDayPromptDate, lastDailyReviewDate, dismissEndOfDayReview } = useAppStore();
   const scheduleDate = useAppStore((s) => s.scheduleDate);
 
   const today = new Date().toISOString().split('T')[0];
@@ -219,6 +256,84 @@ export function DailyScheduleScreen() {
   };
   const scheduleCoach = useBehavioralCoach('schedule_banner');
   const [now, setNow] = useState(nowMinutes());
+  const [showTomorrowSheet, setShowTomorrowSheet] = useState(false);
+  const [showDayReview, setShowDayReview] = useState(false);
+
+  const wakeTimeLabel = minutesToDisplayTime(wakeTime);
+
+  const peakWindowLabel = formatPeakWindowLabel(
+    p.scheduleHints.peakFocusStartMinutes,
+    p.scheduleHints.peakFocusEndMinutes,
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      if (hasSeenTomorrowHook || completedTaskIds.length === 0 || scheduleBlocks.length === 0) return;
+      const timer = setTimeout(() => setShowTomorrowSheet(true), 700);
+      return () => clearTimeout(timer);
+    }, [hasSeenTomorrowHook, completedTaskIds.length, scheduleBlocks.length]),
+  );
+
+  const taskBlockCount = useMemo(
+    () => scheduleBlocks.filter((b) => b.type !== 'break' && b.type !== 'insight').length,
+    [scheduleBlocks],
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      const today = todayIso();
+      if (lastEndOfDayPromptDate === today || lastDailyReviewDate === today) return;
+      if (!isEndOfDayWindow(sleepTime)) return;
+      const hasActivity =
+        completedTaskIds.length + skippedTaskIds.length > 0 || scheduleBlocks.length > 0;
+      if (!hasActivity) return;
+
+      const timer = setTimeout(() => {
+        setShowDayReview(true);
+        trackFunnelEvent('end_of_day_review_opened', {
+          completed: completedTaskIds.length,
+          skipped: skippedTaskIds.length,
+        });
+      }, 900);
+      return () => clearTimeout(timer);
+    }, [
+      lastEndOfDayPromptDate,
+      lastDailyReviewDate,
+      sleepTime,
+      completedTaskIds.length,
+      skippedTaskIds.length,
+      scheduleBlocks.length,
+    ]),
+  );
+
+  const handleDayReviewInsights = () => {
+    trackFunnelEvent('end_of_day_review_insights');
+    dismissEndOfDayReview();
+    setShowDayReview(false);
+    navigation.navigate('Insights' as any);
+  };
+
+  const handleDayReviewDismiss = () => {
+    trackFunnelEvent('end_of_day_review_dismissed');
+    dismissEndOfDayReview();
+    setShowDayReview(false);
+  };
+
+  const handleTomorrowAccept = async () => {
+    setShowTomorrowSheet(false);
+    const granted = await ensureNotificationPermissionsIfEnabled();
+    if (granted) {
+      acceptTomorrowReminder();
+      await scheduleTomorrowReminderIfEnabled(wakeTime);
+    } else {
+      declineTomorrowReminder();
+    }
+  };
+
+  const handleTomorrowDecline = () => {
+    declineTomorrowReminder();
+    setShowTomorrowSheet(false);
+  };
 
   useEffect(() => {
     const interval = setInterval(() => setNow(nowMinutes()), 60_000);
@@ -393,15 +508,18 @@ export function DailyScheduleScreen() {
                 <View style={styles.blockCell}>
                   <TimeBlockItem
                     block={block}
-                    onPress={() =>
-                      navigation.navigate('FocusMode', {
+                    isCompleted={completedTaskIds.includes(block.id)}
+                    isSkipped={skippedTaskIds.includes(block.id)}
+                    onPress={() => {
+                      if (block.type === 'break' || block.type === 'insight') return;
+                      navigation.navigate('TaskCheckIn', {
                         taskId: block.id,
                         taskTitle: block.title,
                         taskDesc: block.description,
                         durationMinutes: block.duration ? parseInt(block.duration, 10) : 25,
                         scheduledTime: block.time,
-                      })
-                    }
+                      });
+                    }}
                   />
                 </View>
               </View>
@@ -446,6 +564,23 @@ export function DailyScheduleScreen() {
           </View>
         </View>
       </Modal>
+
+      <TomorrowHookSheet
+        visible={showTomorrowSheet}
+        peakWindowLabel={peakWindowLabel}
+        wakeTimeLabel={wakeTimeLabel}
+        onAccept={handleTomorrowAccept}
+        onDecline={handleTomorrowDecline}
+      />
+
+      <DayReviewSheet
+        visible={showDayReview}
+        completedCount={completedTaskIds.length}
+        skippedCount={skippedTaskIds.length}
+        totalBlocks={taskBlockCount}
+        onReviewInsights={handleDayReviewInsights}
+        onDismiss={handleDayReviewDismiss}
+      />
     </SafeAreaView>
   );
 }
@@ -808,6 +943,49 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 5,
   },
+  taskHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  taskBlockDimmed: { opacity: 0.72 },
+  taskBlockDone: {
+    borderLeftColor: '#16a34a',
+    backgroundColor: '#16a34a08',
+  },
+  taskBlockSkipped: {
+    borderLeftColor: Colors.outline,
+    backgroundColor: Colors.surfaceContainerHigh,
+  },
+  stateBadgeDone: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#dcfce7',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: Radius.full,
+  },
+  stateBadgeDoneText: {
+    fontFamily: 'Manrope_600SemiBold',
+    fontSize: 10,
+    color: '#16a34a',
+  },
+  stateBadgeSkipped: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: Colors.surfaceContainerHigh,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: Radius.full,
+  },
+  stateBadgeSkippedText: {
+    fontFamily: 'Manrope_600SemiBold',
+    fontSize: 10,
+    color: Colors.outline,
+  },
+  taskTitleDimmed: { color: Colors.onSurfaceVariant },
+  taskDescDimmed: { opacity: 0.75 },
   taskType: {
     fontFamily: 'Manrope_700Bold',
     fontSize: 10,

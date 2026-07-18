@@ -26,6 +26,16 @@ import { trackTaskCompleted, trackTaskStarted } from '../intelligence/eventTrack
 import { buildCoachingContext, generateFocusCoachingLine } from '../coaching';
 import { usePremium } from '../monetization';
 import { useAppStore } from '../store/useAppStore';
+import { CoachingStyleSheet } from '../components/CoachingStyleSheet';
+import { SavePlanSheet } from '../components/SavePlanSheet';
+import { TomorrowHookSheet } from '../components/TomorrowHookSheet';
+import { formatPeakWindowLabel } from '../onboarding/tomorrowHookUtils';
+import { minutesToDisplayTime } from '../utils/formatTime';
+import { isSupabaseSignedIn } from '../auth/sessionUtils';
+import {
+  ensureNotificationPermissionsIfEnabled,
+  scheduleTomorrowReminderIfEnabled,
+} from '../notifications/safeEntry';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'FocusMode'>;
 
@@ -77,7 +87,25 @@ export function FocusModeScreen({ navigation, route }: Props) {
     scheduledTime,
   } = route.params ?? {};
 
-  const { rescheduleScheduleBlock, hasSeenProOffer, isPremium, setHasSeenProOffer } = useAppStore();
+  const {
+    rescheduleScheduleBlock,
+    hasSeenProOffer,
+    isPremium,
+    setHasSeenProOffer,
+    hasChosenCoachingStyle,
+    hasSeenSavePrompt,
+    hasSeenTomorrowHook,
+    onboardingData,
+    account,
+    wakeTime,
+    chooseCoachingStyle,
+    skipCoachingStylePicker,
+    dismissSavePrompt,
+    acceptTomorrowReminder,
+    declineTomorrowReminder,
+    markTaskComplete,
+    recordDayComplete,
+  } = useAppStore();
 
   const p     = usePersonalization();
   const pm    = usePremium();
@@ -94,6 +122,9 @@ export function FocusModeScreen({ navigation, route }: Props) {
   const sessionEndTimeRef  = useRef<number | null>(null);
   const pausedAtRef        = useRef<number | null>(null);
   const pausedTimeLeftRef  = useRef<number>(TOTAL);
+  const [showCoachingSheet, setShowCoachingSheet] = useState(false);
+  const [showSaveSheet, setShowSaveSheet] = useState(false);
+  const [showTomorrowSheet, setShowTomorrowSheet] = useState(false);
   const [showReschedule, setShowReschedule] = useState(false);
   const [customMinutes, setCustomMinutes] = useState(
     scheduledTime ? timeStrToMinutes(scheduledTime) : 540,
@@ -291,6 +322,77 @@ export function FocusModeScreen({ navigation, route }: Props) {
   const auraOpacity = auraAnim.interpolate({ inputRange: [0, 1], outputRange: [0.3, 0.6] });
   const auraScale   = auraAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.1] });
 
+  const peakWindowLabel = formatPeakWindowLabel(
+    p.scheduleHints.peakFocusStartMinutes,
+    p.scheduleHints.peakFocusEndMinutes,
+  );
+  const wakeTimeLabel = minutesToDisplayTime(wakeTime);
+
+  const continueAfterWin = () => {
+    setTimeout(() => {
+      if (!hasSeenProOffer && !isPremium) {
+        setHasSeenProOffer(true);
+        navigation.navigate('ProOffer');
+      } else {
+        navigation.goBack();
+      }
+    }, 800);
+  };
+
+  const maybeShowTomorrowHook = () => {
+    if (!focusTaskId || hasSeenTomorrowHook) {
+      continueAfterWin();
+      return;
+    }
+    setShowTomorrowSheet(true);
+  };
+
+  const handleTomorrowAccept = async () => {
+    setShowTomorrowSheet(false);
+    const granted = await ensureNotificationPermissionsIfEnabled();
+    if (granted) {
+      acceptTomorrowReminder();
+      await scheduleTomorrowReminderIfEnabled(wakeTime);
+    } else {
+      declineTomorrowReminder();
+    }
+    continueAfterWin();
+  };
+
+  const handleTomorrowDecline = () => {
+    declineTomorrowReminder();
+    setShowTomorrowSheet(false);
+    continueAfterWin();
+  };
+
+  const maybeShowSavePrompt = async () => {
+    if (!focusTaskId || hasSeenSavePrompt) {
+      maybeShowTomorrowHook();
+      return;
+    }
+
+    const signedIn = await isSupabaseSignedIn();
+    if (signedIn) {
+      dismissSavePrompt();
+      maybeShowTomorrowHook();
+      return;
+    }
+
+    setShowSaveSheet(true);
+  };
+
+  const finishSession = () => {
+    if (focusTaskId) {
+      markTaskComplete(focusTaskId);
+      recordDayComplete();
+    }
+    if (!hasChosenCoachingStyle && !onboardingData.coaching) {
+      setShowCoachingSheet(true);
+      return;
+    }
+    maybeShowSavePrompt();
+  };
+
   const handleComplete = () => {
     Animated.sequence([
       Animated.timing(completeScale, { toValue: 0.94, duration: 100, useNativeDriver: true }),
@@ -298,15 +400,32 @@ export function FocusModeScreen({ navigation, route }: Props) {
     ]).start(() => {
       setIsCompleted(true);
       isCompletedRef.current = true;
-      setTimeout(() => {
-        if (!hasSeenProOffer && !isPremium) {
-          setHasSeenProOffer(true);
-          navigation.navigate('ProOffer');
-        } else {
-          navigation.goBack();
-        }
-      }, 1200);
+      finishSession();
     });
+  };
+
+  const handleCoachingSelect = (key: string) => {
+    chooseCoachingStyle(key);
+    setShowCoachingSheet(false);
+    maybeShowSavePrompt();
+  };
+
+  const handleCoachingSkip = () => {
+    skipCoachingStylePicker();
+    setShowCoachingSheet(false);
+    maybeShowSavePrompt();
+  };
+
+  const handleSaveContinue = () => {
+    dismissSavePrompt();
+    setShowSaveSheet(false);
+    navigation.navigate('Auth', { fromSavePrompt: true });
+  };
+
+  const handleSaveSkip = () => {
+    dismissSavePrompt();
+    setShowSaveSheet(false);
+    maybeShowTomorrowHook();
   };
 
   const SPRINTS = 4;
@@ -496,6 +615,26 @@ export function FocusModeScreen({ navigation, route }: Props) {
           </Pressable>
         </KeyboardAvoidingView>
       </Modal>
+
+      <CoachingStyleSheet
+        visible={showCoachingSheet}
+        onSelect={handleCoachingSelect}
+        onSkip={handleCoachingSkip}
+      />
+
+      <SavePlanSheet
+        visible={showSaveSheet}
+        onContinue={handleSaveContinue}
+        onSkip={handleSaveSkip}
+      />
+
+      <TomorrowHookSheet
+        visible={showTomorrowSheet}
+        peakWindowLabel={peakWindowLabel}
+        wakeTimeLabel={wakeTimeLabel}
+        onAccept={handleTomorrowAccept}
+        onDecline={handleTomorrowDecline}
+      />
     </SafeAreaView>
   );
 }

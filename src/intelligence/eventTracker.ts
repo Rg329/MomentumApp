@@ -1,6 +1,7 @@
 /**
  * Client-side event tracking facade.
  * Fire-and-forget — never blocks UI; logs warnings on failure.
+ * Unsigned users: events queue locally and sync on sign-in.
  */
 import type { Task } from '../store/useAppStore';
 import { trackTaskEvent as repoTrackTaskEvent } from '../repositories/taskEventsRepo';
@@ -9,6 +10,25 @@ import { refreshUserInsights } from '../repositories/insightsRepo';
 import { generateBehaviorProfile } from '../personalization/behaviorProfile';
 import { useAppStore } from '../store/useAppStore';
 import type { TaskEventMetadata } from './types';
+import { isSupabaseSignedIn } from '../auth/sessionUtils';
+import { enqueuePendingEvent } from './localEventQueue';
+
+async function refreshInsightsIfNeeded(
+  eventType: Parameters<typeof repoTrackTaskEvent>[0]['eventType'],
+) {
+  if (eventType !== 'task_completed' && eventType !== 'task_skipped') return;
+
+  const { onboardingData, wakeTime, sleepTime } = useAppStore.getState();
+  const behavior = generateBehaviorProfile({
+    procrastinationType: onboardingData.procrastinationType,
+    peakTime: onboardingData.peakTime,
+    wakeTimeMinutes: wakeTime,
+    sleepTimeMinutes: sleepTime,
+    coachStyle: onboardingData.coaching,
+  });
+  const { data: events } = await fetchRecentTaskEvents(200, 30);
+  await refreshUserInsights(events, behavior);
+}
 
 async function emit(
   taskId: string,
@@ -17,30 +37,37 @@ async function emit(
   durationMinutes?: number | null,
   metadata?: TaskEventMetadata,
 ) {
-  try {
-    await repoTrackTaskEvent({
-      taskId,
-      eventType,
-      taskTitle,
-      durationMinutes,
-      metadata,
-    });
+  const payload = {
+    taskId,
+    eventType,
+    taskTitle,
+    durationMinutes,
+    metadata,
+    occurredAt: new Date().toISOString(),
+  };
 
-    // Refresh insights cache after meaningful lifecycle events
-    if (eventType === 'task_completed' || eventType === 'task_skipped') {
-      const { onboardingData, wakeTime, sleepTime } = useAppStore.getState();
-      const behavior = generateBehaviorProfile({
-        procrastinationType: onboardingData.procrastinationType,
-        peakTime: onboardingData.peakTime,
-        wakeTimeMinutes: wakeTime,
-        sleepTimeMinutes: sleepTime,
-        coachStyle: onboardingData.coaching,
-      });
-      const { data: events } = await fetchRecentTaskEvents(200, 30);
-      await refreshUserInsights(events, behavior);
+  try {
+    const signedIn = await isSupabaseSignedIn();
+    if (!signedIn) {
+      await enqueuePendingEvent(payload);
+      return;
     }
+
+    const { error } = await repoTrackTaskEvent(payload);
+    if (error) {
+      console.warn(`[Intelligence] RPC failed for ${eventType}, queueing locally:`, error.message);
+      await enqueuePendingEvent(payload);
+      return;
+    }
+
+    await refreshInsightsIfNeeded(eventType);
   } catch (error) {
     console.warn(`[Intelligence] Failed to track ${eventType}:`, error);
+    try {
+      await enqueuePendingEvent(payload);
+    } catch {
+      // ignore secondary failure
+    }
   }
 }
 

@@ -3,10 +3,14 @@ import { MIN_COMPLETED_FOR_COACHING } from './humanCopy';
 
 /** Enough real usage to personalize — not onboarding answers. */
 export function hasEnoughBehavioralData(ctx: CoachingContext): boolean {
+  if (ctx.hasBehavioralData) return true;
+
   return (
-    ctx.metrics.tasksCompleted >= 1
-    || (ctx.metrics.tasksCompleted >= 1 && ctx.metrics.tasksStarted >= 2)
+    ctx.localCompletedCount >= MIN_COMPLETED_FOR_COACHING
+    || ctx.metrics.tasksCompleted >= MIN_COMPLETED_FOR_COACHING
+    || ctx.localSkippedCount >= 2
     || ctx.metrics.tasksSkipped >= 2
+    || ctx.pendingEventCount >= 2
     || ctx.metrics.tasksRescheduled >= 3
   );
 }
