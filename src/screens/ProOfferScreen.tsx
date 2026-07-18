@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Animated,
   Easing, ScrollView,
@@ -6,11 +6,12 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useFocusEffect } from '@react-navigation/native';
 import { RootStackParamList } from '../navigation/RootNavigator';
 import { Colors, Typography, Spacing, Radius, Shadow } from '../theme';
 import { TopBar } from '../components/TopBar';
 import { useAppStore } from '../store/useAppStore';
-import { PREMIUM_COLOR } from '../monetization';
+import { PREMIUM_COLOR, usePremium } from '../monetization';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ProOffer'>;
 
@@ -29,7 +30,8 @@ const ROWS: { label: string; free: boolean; pro: boolean }[] = [
 ];
 
 export function ProOfferScreen({ navigation, route }: Props) {
-  const { startFreeTrial14d, setHasSeenProOffer } = useAppStore();
+  const { setHasSeenProOffer, startFreeTrial14d } = useAppStore();
+  const pm = usePremium();
   const fromOnboarding = route.params?.fromOnboarding ?? false;
 
   const fade  = useRef(new Animated.Value(0)).current;
@@ -64,6 +66,14 @@ export function ProOfferScreen({ navigation, route }: Props) {
     setHasSeenProOffer(true);
     goNext();
   };
+
+  useFocusEffect(
+    useCallback(() => {
+      if (pm.isPremium) {
+        goNext();
+      }
+    }, [pm.isPremium]),
+  );
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>

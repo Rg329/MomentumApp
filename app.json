@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "MomentumApp",
+    "name": "Momentum",
     "slug": "MomentumApp",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -8,12 +8,28 @@
     "userInterfaceStyle": "light",
     "scheme": "momentumapp",
     "plugins": [
-      ["expo-notifications", { "icon": "./assets/icon.png", "color": "#ffffff", "sounds": [] }]
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#ffffff",
+          "sounds": []
+        }
+      ],
+      "expo-dev-client"
     ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.momentumapp.focus",
+      "buildNumber": "1",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSUserNotificationsUsageDescription": "Momentum sends daily reminders, task alerts, and schedule-ready notifications to help you stay on track."
+      }
     },
     "android": {
+      "package": "com.momentumapp.focus",
+      "versionCode": 1,
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -25,6 +41,11 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "960c6e23-3f66-43de-8fa8-a1fb219b1a15"
+      }
     }
   }
 }

@@ -1,7 +1,7 @@
-import { useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
 import { useAppStore } from '../store/useAppStore';
 import { FEATURES, FREE_GENERATION_LIMIT } from './features';
-import { hasEffectivePremium, trialDaysRemaining } from './trial';
+import { trialDaysRemaining } from './trial';
 import type { FeatureId } from './types';
 
 /** Returns `true` if today's date string matches stored date */
@@ -12,7 +12,7 @@ function isToday(dateStr: string | null): boolean {
 
 export interface PremiumHook {
   isPremium:            boolean;
-  /** True while on an active (non-expired) free trial */
+  /** True while on an active store free trial (RevenueCat) */
   isTrialActive:        boolean;
   /** Days left on trial; 0 if not on trial or expired */
   trialDaysLeft:        number;
@@ -27,18 +27,12 @@ export interface PremiumHook {
 }
 
 export function usePremium(): PremiumHook {
-  const isPremiumFlag = useAppStore((s) => s.isPremium);
+  const isPremium = useAppStore((s) => s.isPremium);
   const trial = useAppStore((s) => s.trial);
-  const expireTrialIfNeeded = useAppStore((s) => s.expireTrialIfNeeded);
   const dailyGenerations = useAppStore((s) => s.dailyGenerations);
   const lastGenerationDate = useAppStore((s) => s.lastGenerationDate);
 
-  useEffect(() => {
-    expireTrialIfNeeded();
-  }, [expireTrialIfNeeded, trial.endsAt]);
-
   return useMemo<PremiumHook>(() => {
-    const isPremium = hasEffectivePremium(isPremiumFlag, trial);
     const isTrialActive = isPremium && trial.isTrialActive;
     const trialDaysLeft = isTrialActive ? trialDaysRemaining(trial.endsAt) : 0;
 
@@ -78,5 +72,5 @@ export function usePremium(): PremiumHook {
       generationsLabel,
       generationsExhausted: exhausted,
     };
-  }, [isPremiumFlag, trial, dailyGenerations, lastGenerationDate]);
+  }, [isPremium, trial, dailyGenerations, lastGenerationDate]);
 }

@@ -1,59 +1,76 @@
 import { useEffect, useRef } from 'react';
 import * as Notifications from 'expo-notifications';
+import { Platform } from 'react-native';
 import { useAppStore } from '../store/useAppStore';
 import {
   requestNotificationPermissions,
   setupNotificationCategories,
+  setupAndroidNotificationChannels,
   scheduleMorningNotification,
   scheduleTaskNotifications,
-  handleNotificationResponse,
+  scheduleMissedTaskNotifications,
+  cancelMissedTaskNotifications,
 } from './notificationService';
-
+import {
+  processNotificationResponse,
+} from './notificationDeepLink';
+import { NOTIFICATIONS_ENABLED } from './config';
 
 /**
- * Mount this hook once in App.tsx.
- * It requests permissions, sets up categories, schedules the morning notification,
- * reschedules task notifications whenever the schedule changes, and listens for
- * "Mark Complete" taps from the notification tray.
+ * Mount once in App.tsx.
+ * Requests permissions after onboarding, sets up channels/categories,
+ * schedules reminders, and handles notification taps (deep links).
  */
 export function useNotifications() {
-  const wakeTime      = useAppStore((s) => s.wakeTime);
-  const scheduleBlocks = useAppStore((s) => s.scheduleBlocks);
-  const scheduleDate   = useAppStore((s) => s.scheduleDate);
-  const permissionAsked = useRef(false);
+  const hasOnboarded     = useAppStore((s) => s.hasOnboarded);
+  const wakeTime         = useAppStore((s) => s.wakeTime);
+  const scheduleBlocks   = useAppStore((s) => s.scheduleBlocks);
+  const scheduleDate     = useAppStore((s) => s.scheduleDate);
+  const completedTaskIds = useAppStore((s) => s.completedTaskIds);
+  const permissionAsked  = useRef(false);
 
-  // Request permissions + set up action categories once on mount
   useEffect(() => {
-    if (permissionAsked.current) return;
+    if (!NOTIFICATIONS_ENABLED || Platform.OS === 'web' || !hasOnboarded || permissionAsked.current) return;
     permissionAsked.current = true;
 
     (async () => {
       try {
+        await setupAndroidNotificationChannels();
         const granted = await requestNotificationPermissions();
         if (!granted) return;
         await setupNotificationCategories();
         await scheduleMorningNotification(wakeTime);
       } catch {}
     })();
-  }, []);
+  }, [hasOnboarded, wakeTime]);
 
-  // Reschedule morning notification if wake time changes
   useEffect(() => {
+    if (!NOTIFICATIONS_ENABLED || !hasOnboarded) return;
     scheduleMorningNotification(wakeTime).catch(() => {});
-  }, [wakeTime]);
+  }, [hasOnboarded, wakeTime]);
 
-  // Reschedule task notifications whenever the schedule is regenerated
   useEffect(() => {
-    if (scheduleBlocks.length > 0 && scheduleDate) {
-      scheduleTaskNotifications(scheduleBlocks, scheduleDate).catch(() => {});
-    }
-  }, [scheduleBlocks, scheduleDate]);
+    if (!NOTIFICATIONS_ENABLED || !hasOnboarded || scheduleBlocks.length === 0 || !scheduleDate) return;
 
-  // Listen for notification interactions (e.g. "Mark Complete" button tap)
+    scheduleTaskNotifications(scheduleBlocks, scheduleDate).catch(() => {});
+    scheduleMissedTaskNotifications(
+      scheduleBlocks,
+      scheduleDate,
+      completedTaskIds,
+    ).catch(() => {});
+  }, [hasOnboarded, scheduleBlocks, scheduleDate, completedTaskIds]);
+
   useEffect(() => {
+    if (!NOTIFICATIONS_ENABLED || completedTaskIds.length === 0) return;
+    cancelMissedTaskNotifications(completedTaskIds).catch(() => {});
+  }, [completedTaskIds]);
+
+  useEffect(() => {
+    if (!NOTIFICATIONS_ENABLED || Platform.OS === 'web') return;
+
     try {
       const sub = Notifications.addNotificationResponseReceivedListener(
-        handleNotificationResponse,
+        processNotificationResponse,
       );
       return () => sub.remove();
     } catch {

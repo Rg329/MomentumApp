@@ -61,7 +61,7 @@ export function CredentialsScreen({ navigation }: Props) {
           </View>
           <Text style={styles.title}>Create your account</Text>
           <Text style={styles.sub}>
-            Save your progress across sessions. We’ll store this on your device for now.
+            Your profile syncs to your account when you sign in. See our Privacy Policy in Settings.
           </Text>
         </View>
 

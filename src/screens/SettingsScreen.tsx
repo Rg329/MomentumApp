@@ -27,7 +27,11 @@ import { usePremium, PREMIUM_COLOR } from '../monetization';
 import type { FeatureId } from '../monetization';
 import { usePersonalization } from '../personalization';
 import { syncOnboardingProfileToSupabase } from '../repositories/profileSync';
+import { deleteAccountAndLocalData, navigationResetAfterDeletion } from '../repositories/accountDeletion';
+import { openLegalUrl, PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from '../legal/config';
 import { minutesToDisplayTime, durationMinutesLabel } from '../utils/formatTime';
+import { NOTIFICATIONS_ENABLED } from '../notifications/config';
+import { ensureNotificationPermissionsIfEnabled } from '../notifications/safeEntry';
 
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
 
@@ -278,6 +282,28 @@ export function SettingsScreen() {
     navigation.navigate('MainTabs', { screen: 'Insights' });
   };
 
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Delete account',
+      'This permanently deletes your cloud account and all local app data. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            const { error } = await deleteAccountAndLocalData();
+            if (error) {
+              Alert.alert('Could not delete account', error);
+              return;
+            }
+            navigationResetAfterDeletion(navigation.dispatch);
+          },
+        },
+      ],
+    );
+  };
+
   const handleDevReset = () => {
     Alert.alert(
       'Reset App',
@@ -320,7 +346,15 @@ export function SettingsScreen() {
           label: 'Notification Style',
           value: prettyNotificationStyle(preferences.notificationStyle),
           icon: 'bell-ring-outline',
-          onPress: () => setPicker('notificationStyle'),
+          onPress: () => {
+            if (NOTIFICATIONS_ENABLED) {
+              ensureNotificationPermissionsIfEnabled()
+                .catch(() => {})
+                .finally(() => setPicker('notificationStyle'));
+            } else {
+              setPicker('notificationStyle');
+            }
+          },
         },
         {
           label: 'Adaptive Coaching',
@@ -384,9 +418,21 @@ export function SettingsScreen() {
         },
         {
           label: 'Data & Privacy',
-          value: 'Local + cloud',
+          value: 'View policy',
           icon: 'shield-lock-outline',
-          onPress: () => setInfoModal('privacy'),
+          onPress: () => {
+            openLegalUrl(PRIVACY_POLICY_URL).catch(() => setInfoModal('privacy'));
+          },
+        },
+        {
+          label: 'Terms of Service',
+          value: 'View terms',
+          icon: 'file-document-outline',
+          onPress: () => {
+            openLegalUrl(TERMS_OF_SERVICE_URL).catch(() => {
+              Alert.alert('Could not open Terms of Service', TERMS_OF_SERVICE_URL);
+            });
+          },
         },
       ],
     },
@@ -408,6 +454,12 @@ export function SettingsScreen() {
             : 'Free',
           icon: 'star-circle-outline',
           onPress: () => navigation.navigate('Premium'),
+        },
+        {
+          label: 'Delete Account',
+          value: 'Permanent',
+          icon: 'account-remove-outline',
+          onPress: handleDeleteAccount,
         },
         {
           label: 'App Version',
@@ -628,7 +680,7 @@ export function SettingsScreen() {
       <InfoModal
         visible={infoModal === 'privacy'}
         title="Data & Privacy"
-        body={'Your tasks and schedule are stored on this device. If you sign in, onboarding preferences and behavioural events sync to Supabase under your account.\n\nWe do not sell your data. You can delete your data by resetting the app below.'}
+        body={'Your tasks and schedule are stored on this device. If you sign in, onboarding preferences and behavioural events sync to Supabase under your account.\n\nWe do not sell your data. You can delete your account and all local data from Settings → Delete Account.\n\nPrivacy Policy: ' + PRIVACY_POLICY_URL}
         onClose={() => setInfoModal(null)}
       />
 

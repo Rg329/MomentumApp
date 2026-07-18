@@ -1,15 +1,26 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
   ScrollView, Animated, Easing, Dimensions,
+  ActivityIndicator, Alert, Platform, Linking,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/RootNavigator';
 import { Colors, Radius, Spacing } from '../theme';
-import { PREMIUM_FEATURES, PRICING, PREMIUM_COLOR, usePremium } from '../monetization';
-import { useAppStore } from '../store/useAppStore';
+import {
+  PREMIUM_FEATURES,
+  PRICING,
+  PREMIUM_COLOR,
+  usePremium,
+  purchasePlan,
+  restorePurchases,
+  getOfferingPrices,
+  parsePurchaseError,
+  type PlanId,
+} from '../monetization';
+import { PRIVACY_POLICY_URL, TERMS_OF_SERVICE_URL } from '../legal/config';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Premium'>;
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
@@ -62,8 +73,9 @@ const heroStyles = StyleSheet.create({
 export function PremiumScreen({ navigation }: Props) {
   const insets   = useSafeAreaInsets();
   const pm = usePremium();
-  const setPremium = useAppStore((s) => s.setPremium);
-  const [selectedPlan, setSelectedPlan] = useState<'monthly' | 'annual' | 'lifetime'>('annual');
+  const [selectedPlan, setSelectedPlan] = useState<PlanId>('annual');
+  const [storePrices, setStorePrices] = useState<Partial<Record<PlanId, string>>>({});
+  const [busy, setBusy] = useState<'purchase' | 'restore' | null>(null);
 
   // Entrance animations
   const fade  = useRef(new Animated.Value(0)).current;
@@ -77,9 +89,58 @@ export function PremiumScreen({ navigation }: Props) {
     ]).start();
   }, []);
 
-  const handleSubscribe = () => {
-    setPremium(true);
-    navigation.goBack();
+  useEffect(() => {
+    getOfferingPrices().then(setStorePrices).catch(() => {});
+  }, []);
+
+  const displayPrice = useCallback(
+    (planId: PlanId, fallback: string) => storePrices[planId] ?? fallback,
+    [storePrices],
+  );
+
+  const handleSubscribe = async () => {
+    if (busy) return;
+    setBusy('purchase');
+    try {
+      const success = await purchasePlan(selectedPlan);
+      if (success) {
+        navigation.goBack();
+      }
+    } catch (e: unknown) {
+      const { userCancelled, message } = parsePurchaseError(e);
+      if (!userCancelled && message) {
+        Alert.alert('Purchase failed', message);
+      }
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleRestore = async () => {
+    if (busy) return;
+    setBusy('restore');
+    try {
+      const success = await restorePurchases();
+      if (success) {
+        Alert.alert('Restored', 'Your subscription has been restored.');
+        navigation.goBack();
+      } else {
+        Alert.alert('No subscription found', 'We could not find an active subscription for this account.');
+      }
+    } catch (e: unknown) {
+      const { userCancelled, message } = parsePurchaseError(e);
+      if (!userCancelled) {
+        Alert.alert('Restore failed', message || 'Could not restore purchases.');
+      }
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const openLegal = (url: string) => {
+    Linking.openURL(url).catch(() => {
+      Alert.alert('Could not open link', url);
+    });
   };
 
   const pressIn  = () => Animated.spring(btnScale, { toValue: 0.96, useNativeDriver: true, tension: 400, friction: 8 }).start();
@@ -89,6 +150,8 @@ export function PremiumScreen({ navigation }: Props) {
   ]).start();
 
   const activePricing = PRICING.find((p) => p.id === selectedPlan)!;
+  const activePrice = displayPrice(selectedPlan, activePricing.price);
+  const isSubscriptionPlan = selectedPlan === 'monthly' || selectedPlan === 'annual';
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -161,7 +224,9 @@ export function PremiumScreen({ navigation }: Props) {
                   </View>
                 )}
                 <Text style={[styles.planLabel, selectedPlan === plan.id && styles.planLabelActive]}>{plan.label}</Text>
-                <Text style={[styles.planPrice, selectedPlan === plan.id && styles.planPriceActive]}>{plan.price}</Text>
+                <Text style={[styles.planPrice, selectedPlan === plan.id && styles.planPriceActive]}>
+                  {displayPrice(plan.id as PlanId, plan.price)}
+                </Text>
                 <Text style={[styles.planPeriod, selectedPlan === plan.id && styles.planPeriodActive]}>{plan.period}</Text>
                 {plan.savings && <Text style={styles.planSavings}>{plan.savings}</Text>}
               </TouchableOpacity>
@@ -179,24 +244,61 @@ export function PremiumScreen({ navigation }: Props) {
           ) : (
             <Animated.View style={{ transform: [{ scale: btnScale }] }}>
               <TouchableOpacity
-                style={styles.ctaBtn}
+                style={[styles.ctaBtn, busy === 'purchase' && styles.ctaBtnDisabled]}
                 onPress={handleSubscribe}
                 onPressIn={pressIn}
                 onPressOut={pressOut}
                 activeOpacity={0.88}
+                disabled={busy !== null}
               >
                 <View style={styles.ctaBtnShine} />
-                <Text style={styles.ctaBtnLabel}>Get {activePricing.label} — {activePricing.price}</Text>
-                <View style={styles.ctaBtnArrow}>
-                  <MaterialCommunityIcons name="arrow-right" size={15} color={PREMIUM_COLOR} />
-                </View>
+                {busy === 'purchase' ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <>
+                    <Text style={styles.ctaBtnLabel}>Get {activePricing.label} — {activePrice}</Text>
+                    <View style={styles.ctaBtnArrow}>
+                      <MaterialCommunityIcons name="arrow-right" size={15} color={PREMIUM_COLOR} />
+                    </View>
+                  </>
+                )}
               </TouchableOpacity>
             </Animated.View>
           )}
-          <Text style={styles.trialNote}>14-day free trial · Cancel any time</Text>
-          <TouchableOpacity style={styles.restoreBtn} activeOpacity={0.7}>
-            <Text style={styles.restoreLbl}>Restore purchases</Text>
+          {isSubscriptionPlan ? (
+            <Text style={styles.trialNote}>
+              14-day free trial, then {activePrice}/{selectedPlan === 'monthly' ? 'month' : 'year'}. Auto-renews until cancelled.
+            </Text>
+          ) : (
+            <Text style={styles.trialNote}>One-time purchase. No subscription.</Text>
+          )}
+          <Text style={styles.subscriptionLegal}>
+            Payment is charged to your {Platform.OS === 'ios' ? 'Apple ID' : 'Google Play'} account.
+            {isSubscriptionPlan
+              ? ' Subscription automatically renews unless cancelled at least 24 hours before the end of the current period.'
+              : ''}
+          </Text>
+          <TouchableOpacity
+            style={styles.restoreBtn}
+            activeOpacity={0.7}
+            onPress={handleRestore}
+            disabled={busy !== null}
+          >
+            {busy === 'restore' ? (
+              <ActivityIndicator color={Colors.outline} size="small" />
+            ) : (
+              <Text style={styles.restoreLbl}>Restore purchases</Text>
+            )}
           </TouchableOpacity>
+          <View style={styles.legalRow}>
+            <TouchableOpacity onPress={() => openLegal(PRIVACY_POLICY_URL)} activeOpacity={0.7}>
+              <Text style={styles.legalLink}>Privacy Policy</Text>
+            </TouchableOpacity>
+            <Text style={styles.legalSep}>·</Text>
+            <TouchableOpacity onPress={() => openLegal(TERMS_OF_SERVICE_URL)} activeOpacity={0.7}>
+              <Text style={styles.legalLink}>Terms of Service</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -307,6 +409,18 @@ const styles = StyleSheet.create({
   ctaBtnLabel: { fontFamily: 'Manrope_700Bold', fontSize: 16, color: '#fff', letterSpacing: 0.1 },
   ctaBtnArrow: { width: 26, height: 26, borderRadius: 13, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
   trialNote:   { fontFamily: 'Manrope_400Regular', fontSize: 12, color: Colors.outline, textAlign: 'center' },
-  restoreBtn:  { paddingVertical: 4 },
+  subscriptionLegal: {
+    fontFamily: 'Manrope_400Regular',
+    fontSize: 11,
+    color: Colors.outline,
+    textAlign: 'center',
+    lineHeight: 16,
+    paddingHorizontal: 8,
+  },
+  restoreBtn:  { paddingVertical: 4, minHeight: 24, justifyContent: 'center' },
   restoreLbl:  { fontFamily: 'Manrope_500Medium', fontSize: 12, color: Colors.outline, textDecorationLine: 'underline' },
+  legalRow:    { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
+  legalLink:   { fontFamily: 'Manrope_500Medium', fontSize: 11, color: Colors.outline, textDecorationLine: 'underline' },
+  legalSep:    { fontFamily: 'Manrope_400Regular', fontSize: 11, color: Colors.outline },
+  ctaBtnDisabled: { opacity: 0.75 },
 });

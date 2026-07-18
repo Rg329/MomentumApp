@@ -19,13 +19,23 @@ import { createSessionFromUrl } from './src/supabase/authCallback';
 import { supabase } from './src/supabase/client';
 import { syncOnboardingProfileToSupabase } from './src/repositories/profileSync';
 import { useAppStore } from './src/store/useAppStore';
-// import { useNotifications } from './src/notifications/useNotifications'; // requires dev build
+import { NOTIFICATIONS_ENABLED } from './src/notifications/config';
+import {
+  configurePurchases,
+  syncPremiumFromRevenueCat,
+  addCustomerInfoListener,
+  logInRevenueCat,
+  logOutRevenueCat,
+  linkPurchasesToUser,
+} from './src/monetization/purchases';
 
 SplashScreenExpo.preventAutoHideAsync();
 
 function AppInner() {
-  // useNotifications(); // requires dev build — re-enable when building with EAS
-  return null;
+  if (!NOTIFICATIONS_ENABLED) return null;
+
+  const { NotificationBootstrap } = require('./src/notifications/NotificationBootstrap') as typeof import('./src/notifications/NotificationBootstrap');
+  return <NotificationBootstrap />;
 }
 
 export default function App() {
@@ -59,10 +69,50 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const { data: authSub } = supabase.auth.onAuthStateChange((event, session) => {
+    let removeListener: (() => void) | undefined;
+
+    const initPurchases = async () => {
+      try {
+        await configurePurchases();
+        removeListener = addCustomerInfoListener();
+        await syncPremiumFromRevenueCat();
+
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user.id) {
+          await linkPurchasesToUser(session.user.id);
+        }
+      } catch (e) {
+        console.warn('[Purchases] Could not initialize RevenueCat:', e);
+      }
+    };
+
+    initPurchases();
+
+    return () => {
+      removeListener?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    const { data: authSub } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_OUT') {
+        try {
+          await logOutRevenueCat();
+        } catch (e) {
+          console.warn('[Purchases] Could not log out RevenueCat user:', e);
+        }
+        return;
+      }
+
       if (!session) return;
+
       if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
         syncOnboardingProfileToSupabase();
+        try {
+          await logInRevenueCat(session.user.id);
+        } catch (e) {
+          console.warn('[Purchases] Could not link RevenueCat user:', e);
+        }
       }
     });
 
@@ -71,7 +121,6 @@ export default function App() {
 
   useEffect(() => {
     const run = () => {
-      useAppStore.getState().expireTrialIfNeeded();
       useAppStore.getState().clearStaleSchedule();
     };
     useAppStore.persist.onFinishHydration(run);
@@ -86,9 +135,22 @@ export default function App() {
     );
   }
 
+  const navigationProps = NOTIFICATIONS_ENABLED
+    ? (() => {
+        const { navigationRef } = require('./src/navigation/navigationRef') as typeof import('./src/navigation/navigationRef');
+        const { handleInitialNotificationDeepLink } = require('./src/notifications/notificationDeepLink') as typeof import('./src/notifications/notificationDeepLink');
+        return {
+          ref: navigationRef,
+          onReady: () => {
+            handleInitialNotificationDeepLink().catch(() => {});
+          },
+        };
+      })()
+    : {};
+
   return (
     <SafeAreaProvider>
-      <NavigationContainer>
+      <NavigationContainer {...navigationProps}>
         <StatusBar style="dark" />
         <AppInner />
         <RootNavigator />

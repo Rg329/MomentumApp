@@ -121,6 +121,7 @@ interface AppState {
   setConstraints:      (constraints: Constraint[]) => void;
   setDeadlines:        (deadlines: DeadlineTask[]) => void;
   setPremium:          (v: boolean) => void;
+  syncPremiumFromRevenueCat: (isPremium: boolean, isTrialActive: boolean, trialEndsAt: string | null) => void;
   setHasSeenProOffer:  (v: boolean) => void;
   setScheduleDate:     (date: string | null) => void;
   startFreeTrial14d:   () => void;
@@ -227,6 +228,35 @@ export const useAppStore = create<AppState>()(
             ? { ...s.trial, isTrialActive: false }
             : s.trial,
         })),
+      syncPremiumFromRevenueCat: (isPremium, isTrialActive, trialEndsAt) =>
+        set((s) => {
+          if (isPremium) {
+            return {
+              isPremium: true,
+              trial: {
+                isTrialActive: isTrialActive,
+                startedAt: s.trial.startedAt,
+                endsAt: trialEndsAt,
+              },
+            };
+          }
+
+          const localTrialValid =
+            s.trial.isTrialActive &&
+            s.trial.endsAt &&
+            !isTrialExpired(s.trial.endsAt);
+
+          if (localTrialValid) {
+            return { isPremium: true, trial: s.trial };
+          }
+
+          return {
+            isPremium: false,
+            trial: s.trial.isTrialActive
+              ? { ...s.trial, isTrialActive: false }
+              : s.trial,
+          };
+        }),
       setHasSeenProOffer: (v) => set({ hasSeenProOffer: v }),
       setScheduleDate: (date) => set({ scheduleDate: date }),
       startFreeTrial14d: () => {
@@ -235,6 +265,7 @@ export const useAppStore = create<AppState>()(
         endsAt.setDate(endsAt.getDate() + 14);
         set({
           isPremium: true,
+          hasSeenProOffer: true,
           trial: {
             isTrialActive: true,
             startedAt: startedAt.toISOString(),

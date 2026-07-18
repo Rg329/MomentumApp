@@ -3,6 +3,7 @@ import { supabase } from '../supabase/client';
 import { derivePersonalization } from '../personalization/engine';
 import { generateScheduleFromTasks, parseTimeToMinutes } from './generateSchedule';
 import type { GenerateScheduleResult } from './generateSchedule';
+import { notifyScheduleReadyIfEnabled } from '../notifications/safeEntry';
 
 /**
  * Build today's timetable using Claude AI, with the local algorithm as a silent fallback.
@@ -30,6 +31,7 @@ export async function buildAndSaveUserSchedule(): Promise<GenerateScheduleResult
         scheduleBlocks: data.blocks,
         scheduleDate:   new Date().toISOString().split('T')[0],
       });
+      notifyScheduleReadyIfEnabled(data.blocks.length);
       return { blocks: data.blocks, droppedTasks: [] };
     }
   } catch {
@@ -74,5 +76,6 @@ function buildLocalSchedule(): GenerateScheduleResult {
     scheduleBlocks: result.blocks,
     scheduleDate:   new Date().toISOString().split('T')[0],
   });
+  notifyScheduleReadyIfEnabled(result.blocks.length);
   return result;
 }
