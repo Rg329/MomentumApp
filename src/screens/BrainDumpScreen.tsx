@@ -31,7 +31,11 @@ import { PremiumBadge } from '../components/PremiumBadge';
 import { UpgradePrompt } from '../components/UpgradePrompt';
 import { DurationScrollPicker } from '../components/DurationScrollPicker';
 import { WakeSleepSheet } from '../components/WakeSleepSheet';
+import { ScheduleSourceDevBadge } from '../components/ScheduleSourceDevBadge';
+import { FirstRunFocusCard } from '../components/FirstRunFocusCard';
+import { DemoTasksBanner } from '../components/DemoTasksBanner';
 import { getStarterTasks } from '../onboarding/starterTasks';
+import { trackFunnelEvent } from '../analytics/funnelTracker';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'BrainDump'>;
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
@@ -521,7 +525,7 @@ function NewTasksBanner({ count, onPress }: { count: number; onPress: () => void
     <TouchableOpacity style={styles.newTasksBanner} onPress={onPress} activeOpacity={0.85}>
       <MaterialCommunityIcons name="calendar-sync-outline" size={16} color={Colors.primary} />
       <Text style={styles.newTasksBannerText}>
-        {count} new task{count !== 1 ? 's' : ''} — regenerate on Schedule to fit them in
+        {count} new task{count !== 1 ? 's' : ''} — tap Update my plan to fit them into today
       </Text>
       <MaterialCommunityIcons name="chevron-right" size={18} color={Colors.primary} />
     </TouchableOpacity>
@@ -551,7 +555,14 @@ function TaskRow({ task, index, onRemove, onLongPress }: {
           <Text style={styles.taskIndexText}>{String(index + 1).padStart(2, '0')}</Text>
         </View>
         <View style={{ flex: 1, gap: 5 }}>
-          <Text style={styles.taskText}>{task.text}</Text>
+          <View style={styles.taskTitleRow}>
+            <Text style={styles.taskText}>{task.text}</Text>
+            {task.isDemo ? (
+              <View style={styles.demoPill}>
+                <Text style={styles.demoPillText}>Demo</Text>
+              </View>
+            ) : null}
+          </View>
           <View style={styles.taskDurationPill}>
             <MaterialCommunityIcons name="timer-outline" size={11} color={Colors.primary} />
             <Text style={styles.taskDurationText}>{durationLabel(task.durationMinutes)}</Text>
@@ -651,6 +662,7 @@ export function BrainDumpScreen({ navigation }: Props) {
     hasSeenWelcomeCard, dismissWelcomeCard, incrementGeneration, scheduleBlocks, scheduleDate,
     lastScheduledTaskIds,
     hasConfirmedDayWindow, confirmDayWindow,
+    firstRunPath, addDemoStarterTasks, setFirstRunPath,
   } = useAppStore();
   const procrastinationType = useAppStore((s) => s.onboardingData.procrastinationType);
   const starterTasks = getStarterTasks(procrastinationType);
@@ -673,7 +685,10 @@ export function BrainDumpScreen({ navigation }: Props) {
   const hasActiveSchedule =
     scheduleBlocks.length > 0 && scheduleDate === today;
   const newTasksSincePlan = tasks.filter((t) => !lastScheduledTaskIds.includes(t.id));
+  const needsScheduleUpdate = hasActiveSchedule && newTasksSincePlan.length > 0;
   const isPlanningMode  = !hasActiveSchedule;
+  const hasDemoTasks = tasks.some((t) => t.isDemo);
+  const showFirstRunChoice = firstRunPath === 'none' && !hasTasks && isPlanningMode;
 
   const goToSchedule = () => {
     const routeNames = (navigation.getState()?.routeNames ?? []) as string[];
@@ -692,20 +707,17 @@ export function BrainDumpScreen({ navigation }: Props) {
   const awakeMins     = Math.max(0, sleepTime - wakeTime);
   const availableMins = Math.max(0, awakeMins - 120);
 
-  const suggestionsToShow = starterTasks
-    .map((t) => t.text)
-    .filter((s) => !tasks.find((t) => t.text.toLowerCase() === s.toLowerCase()))
-    .slice(0, 3);
-
-  const useStarterTasks = () => {
-    starterTasks.forEach((t) => {
-      if (!tasks.find((existing) => existing.text.toLowerCase() === t.text.toLowerCase())) {
-        addTask(t.text, t.durationMinutes);
-      }
-    });
+  const handleTrySamplePlan = () => {
+    addDemoStarterTasks(starterTasks);
+    trackFunnelEvent('demo_plan_started');
   };
 
-  const proceedToGenerate = () => {
+  const handleAddOwnTasks = () => {
+    setFirstRunPath('own');
+    openNewTaskModal();
+  };
+
+  const proceedToGenerate = (options?: { skipConstraints?: boolean }) => {
     setLoading(true);
     incrementGeneration();
     Animated.sequence([
@@ -713,7 +725,11 @@ export function BrainDumpScreen({ navigation }: Props) {
       Animated.timing(buttonScale, { toValue: 1,    duration: 100, useNativeDriver: true }),
     ]).start(() => setTimeout(() => {
       setLoading(false);
-      navigation.navigate('Constraints');
+      if (options?.skipConstraints) {
+        navigation.navigate('AIAnalysis');
+      } else {
+        navigation.navigate('Constraints');
+      }
     }, 700));
   };
 
@@ -728,6 +744,15 @@ export function BrainDumpScreen({ navigation }: Props) {
       return;
     }
     proceedToGenerate();
+  };
+
+  const handleUpdatePlan = () => {
+    if (!needsScheduleUpdate) return;
+    if (pm.generationsExhausted) {
+      setShowUpgradePrompt(true);
+      return;
+    }
+    proceedToGenerate({ skipConstraints: true });
   };
 
   const handleWakeSleepConfirm = () => {
@@ -816,11 +841,19 @@ export function BrainDumpScreen({ navigation }: Props) {
             <View style={styles.motivationAccent} />
             <Text style={styles.motivationText} numberOfLines={1}>
               {hasActiveSchedule
-                ? 'View your timeline on Schedule — regenerate there if you add tasks.'
+                ? needsScheduleUpdate
+                  ? `${newTasksSincePlan.length} new task${newTasksSincePlan.length !== 1 ? 's' : ''} — update your plan to slot them in.`
+                  : 'Your timeline is on Schedule. Add more anytime.'
                 : motivation}
             </Text>
           </View>
         </Animated.View>
+
+        {__DEV__ && hasActiveSchedule && (
+          <View style={styles.devBadgeRow}>
+            <ScheduleSourceDevBadge />
+          </View>
+        )}
 
         {/* ── Streak bar ── */}
         <StreakBar navigation={navigation} />
@@ -837,12 +870,13 @@ export function BrainDumpScreen({ navigation }: Props) {
           onScrollBeginDrag={Keyboard.dismiss}
           ListHeaderComponent={
             <>
-              {!hasSeenWelcomeCard && isPlanningMode ? (
+              {!hasSeenWelcomeCard && isPlanningMode && firstRunPath === 'own' ? (
                 <WelcomeCard
                   coachStyle={p.profile.coachStyle}
                   onDismiss={dismissWelcomeCard}
                 />
               ) : null}
+              {hasDemoTasks && isPlanningMode ? <DemoTasksBanner /> : null}
               {hasActiveSchedule ? (
                 <View style={{ gap: 10, marginBottom: hasTasks ? 4 : 0 }}>
                   <PlanPreviewCard
@@ -851,7 +885,7 @@ export function BrainDumpScreen({ navigation }: Props) {
                     onPress={goToSchedule}
                   />
                   {newTasksSincePlan.length > 0 && (
-                    <NewTasksBanner count={newTasksSincePlan.length} onPress={goToSchedule} />
+                    <NewTasksBanner count={newTasksSincePlan.length} onPress={handleUpdatePlan} />
                   )}
                   {hasTasks ? (
                     <Text style={styles.sectionLabel}>Add more to today</Text>
@@ -861,54 +895,35 @@ export function BrainDumpScreen({ navigation }: Props) {
             </>
           }
           ListEmptyComponent={
-            hasActiveSchedule ? (
+            showFirstRunChoice ? (
+              <FirstRunFocusCard
+                sampleTasks={starterTasks}
+                onTrySample={handleTrySamplePlan}
+                onAddOwn={handleAddOwnTasks}
+              />
+            ) : hasActiveSchedule ? (
               <View style={styles.emptyState}>
                 <PulseIcon icon="plus-circle-outline" />
                 <View style={{ alignItems: 'center', gap: 6 }}>
                   <Text style={styles.emptyTitle}>Anything else for today?</Text>
                   <Text style={styles.emptySubtitle}>
-                    Tap Add more below. When you're ready, regenerate on the Schedule tab.
+                    Tap Add more below, then Update my plan to fit new tasks into today.
                   </Text>
-                </View>
-                <View style={styles.suggestions}>
-                  {suggestionsToShow.map((s) => (
-                    <TouchableOpacity key={s} style={styles.suggestionChip} onPress={() => addTask(s, 30)} activeOpacity={0.7}>
-                      <MaterialCommunityIcons name="plus" size={13} color={Colors.primary} />
-                      <Text style={styles.suggestionText}>{s}</Text>
-                    </TouchableOpacity>
-                  ))}
                 </View>
               </View>
             ) : (
             <View style={styles.emptyState}>
               <PulseIcon icon="playlist-edit" />
               <View style={{ alignItems: 'center', gap: 6 }}>
-                <Text style={styles.emptyTitle}>Pick a few things to tackle</Text>
+                <Text style={styles.emptyTitle}>Add your first tasks</Text>
                 <Text style={styles.emptySubtitle}>
-                  Tap suggestions below — or use all three to get started fast.
+                  Tap Add Task below and enter what you actually want to accomplish today.
                 </Text>
               </View>
-              <View style={styles.starterPreview}>
-                {starterTasks.map((t) => (
-                  <View key={t.text} style={styles.starterRow}>
-                    <MaterialCommunityIcons name="checkbox-blank-circle-outline" size={14} color={Colors.primary} />
-                    <Text style={styles.starterRowText}>{t.text}</Text>
-                    <Text style={styles.starterRowMins}>{t.durationMinutes}m</Text>
-                  </View>
-                ))}
-              </View>
-              <TouchableOpacity style={styles.useStarterBtn} onPress={useStarterTasks} activeOpacity={0.88}>
-                <MaterialCommunityIcons name="lightning-bolt" size={16} color={Colors.onPrimary} />
-                <Text style={styles.useStarterLabel}>Use these 3</Text>
+              <TouchableOpacity style={styles.useStarterBtn} onPress={openNewTaskModal} activeOpacity={0.88}>
+                <MaterialCommunityIcons name="plus-circle-outline" size={16} color={Colors.onPrimary} />
+                <Text style={styles.useStarterLabel}>Add a task</Text>
               </TouchableOpacity>
-              <View style={styles.suggestions}>
-                {suggestionsToShow.map((s) => (
-                  <TouchableOpacity key={s} style={styles.suggestionChip} onPress={() => addTask(s, 30)} activeOpacity={0.7}>
-                    <MaterialCommunityIcons name="plus" size={13} color={Colors.primary} />
-                    <Text style={styles.suggestionText}>{s}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
             </View>
             )
           }
@@ -999,6 +1014,40 @@ export function BrainDumpScreen({ navigation }: Props) {
                   {hasTasks && (
                     <MaterialCommunityIcons name="arrow-right" size={17} color={Colors.onPrimary} />
                   )}
+                  {pm.generationsLabel ? (
+                    <View style={styles.genCountBubble}>
+                      <Text style={styles.genCountText}>{pm.generationsLabel}</Text>
+                    </View>
+                  ) : null}
+                </>
+              )}
+              <View style={styles.ctaShine} pointerEvents="none" />
+            </TouchableOpacity>
+          </Animated.View>
+          ) : needsScheduleUpdate ? (
+          <Animated.View style={[{ flex: 1 }, { transform: [{ scale: buttonScale }] }]}>
+            <TouchableOpacity
+              style={[styles.generateBtn, pm.generationsExhausted && styles.generateBtnGated]}
+              onPress={handleUpdatePlan}
+              disabled={loading}
+              activeOpacity={1}
+              onPressIn={() => Animated.spring(buttonScale, { toValue: 0.96, useNativeDriver: true, tension: 400, friction: 8 }).start()}
+              onPressOut={() => Animated.sequence([
+                Animated.spring(buttonScale, { toValue: 1.02, useNativeDriver: true, tension: 400, friction: 6 }),
+                Animated.spring(buttonScale, { toValue: 1,    useNativeDriver: true, tension: 300, friction: 8 }),
+              ]).start()}
+            >
+              {loading ? (
+                <MaterialCommunityIcons name="loading" size={18} color={Colors.onPrimary} />
+              ) : pm.generationsExhausted ? (
+                <>
+                  <MaterialCommunityIcons name="lock-outline" size={15} color="#fff" />
+                  <Text style={styles.generateBtnLabel}>Go Pro to Update</Text>
+                </>
+              ) : (
+                <>
+                  <MaterialCommunityIcons name="calendar-sync" size={16} color={Colors.onPrimary} />
+                  <Text style={styles.generateBtnLabel} numberOfLines={1}>Update my plan</Text>
                   {pm.generationsLabel ? (
                     <View style={styles.genCountBubble}>
                       <Text style={styles.genCountText}>{pm.generationsLabel}</Text>
@@ -1182,6 +1231,11 @@ const styles = StyleSheet.create({
   heroTitleAccent: {
     color: Colors.primary,
   },
+  devBadgeRow: {
+    paddingHorizontal: Spacing.lg,
+    marginTop: -4,
+    marginBottom: Spacing.sm,
+  },
   motivationRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1219,7 +1273,7 @@ const styles = StyleSheet.create({
   },
   emptyTitle: { fontFamily: 'Manrope_700Bold', color: Colors.onSurface, fontSize: 16, textAlign: 'center' },
   emptyTitleAccent: { fontFamily: 'Manrope_700Bold', color: Colors.primary, fontSize: 15, textAlign: 'center', marginTop: -2 },
-  emptySubtitle: { fontFamily: 'Manrope_400Regular', color: Colors.onSurfaceVariant, textAlign: 'center', maxWidth: 270, lineHeight: 22, fontSize: 13, marginTop: 4 },
+  emptySubtitle: { fontFamily: 'Manrope_500Medium', color: Colors.onSurfaceVariant, textAlign: 'center', maxWidth: 270, lineHeight: 22, fontSize: 13, marginTop: 4 },
 
   starterPreview: {
     width: '100%',
@@ -1284,7 +1338,17 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: Colors.primary + '18',
   },
   taskIndexText: { fontFamily: 'Manrope_800ExtraBold', fontSize: 12, color: Colors.primary },
-  taskText: { fontFamily: 'Manrope_600SemiBold', color: Colors.onSurface, fontSize: 14, lineHeight: 20 },
+  taskText: { fontFamily: 'Manrope_600SemiBold', color: Colors.onSurface, fontSize: 14, lineHeight: 20, flex: 1 },
+  taskTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  demoPill: {
+    backgroundColor: '#b4530918',
+    borderRadius: Radius.full,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: '#b4530933',
+  },
+  demoPillText: { fontFamily: 'Manrope_700Bold', fontSize: 9, color: '#b45309', letterSpacing: 0.4 },
   taskDurationPill: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
     alignSelf: 'flex-start',
@@ -1442,7 +1506,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   inlineTitle: { fontFamily: 'Manrope_700Bold', fontSize: 16, color: Colors.onSurface, letterSpacing: -0.2 },
-  inlineSubtitle: { fontFamily: 'Manrope_400Regular', fontSize: 12, color: Colors.onSurfaceVariant, marginTop: 1 },
+  inlineSubtitle: { fontFamily: 'Manrope_500Medium', fontSize: 12, color: Colors.onSurfaceVariant, marginTop: 1 },
   inlineCloseBtn: {
     width: 34,
     height: 34,
@@ -1556,7 +1620,7 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   sheetTitle: { fontFamily: 'Manrope_700Bold', fontSize: 19, color: Colors.onSurface, letterSpacing: -0.4 },
-  sheetSubtitle: { fontFamily: 'Manrope_400Regular', fontSize: 13, color: Colors.onSurfaceVariant, textAlign: 'center', opacity: 0.8, marginTop: 2 },
+  sheetSubtitle: { fontFamily: 'Manrope_500Medium', fontSize: 13, color: Colors.onSurfaceVariant, textAlign: 'center', opacity: 0.8, marginTop: 2 },
   fieldLabel: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   fieldLabelText: { fontFamily: 'Manrope_600SemiBold', fontSize: 11, color: Colors.primary, textTransform: 'uppercase', letterSpacing: 1.2 },
   nameInput: {
@@ -1607,7 +1671,7 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: Colors.primary + '12',
   },
   infoIconWrap: { width: 32, height: 32, borderRadius: 9, backgroundColor: Colors.primary + '15', alignItems: 'center', justifyContent: 'center', marginTop: 1 },
-  infoText: { flex: 1, fontFamily: 'Manrope_400Regular', color: Colors.onSurface, fontSize: 13, lineHeight: 21 },
+  infoText: { flex: 1, fontFamily: 'Manrope_500Medium', color: Colors.onSurface, fontSize: 13, lineHeight: 21 },
   // Kept for compat
   aiCard: {
     flexDirection: 'row', gap: 12, alignItems: 'flex-start',
@@ -1615,7 +1679,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.lg, padding: 14, borderWidth: 1, borderColor: Colors.primary + '12',
   },
   aiIconWrap: { width: 32, height: 32, borderRadius: 9, backgroundColor: Colors.primary + '15', alignItems: 'center', justifyContent: 'center' },
-  aiText: { flex: 1, fontFamily: 'Manrope_400Regular', color: Colors.onSurface, fontSize: 13, lineHeight: 21 },
+  aiText: { flex: 1, fontFamily: 'Manrope_500Medium', color: Colors.onSurface, fontSize: 13, lineHeight: 21 },
   // AnimatedPrimaryButton styles
   primaryBtn: {
     backgroundColor: Colors.primary, paddingVertical: 17,
@@ -1671,7 +1735,7 @@ const styles = StyleSheet.create({
   capacityBarFill: { height: '100%', borderRadius: 3 },
   capacityStats: { flexDirection: 'row', alignItems: 'center' },
   capacityStat: { flex: 1, alignItems: 'center', gap: 3 },
-  capacityStatLabel: { fontFamily: 'Manrope_400Regular', fontSize: 11, color: Colors.onSurfaceVariant },
+  capacityStatLabel: { fontFamily: 'Manrope_500Medium', fontSize: 11, color: Colors.onSurfaceVariant },
   capacityStatValue: { fontFamily: 'Manrope_700Bold', fontSize: 15, color: Colors.onSurface },
   capacityDivider: { width: 1, height: 32, backgroundColor: Colors.outlineVariant + '40' },
 
@@ -1691,6 +1755,6 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary, opacity: 0.5,
   },
   previewItemText: { flex: 1, fontFamily: 'Manrope_500Medium', fontSize: 13, color: Colors.onSurface },
-  previewItemDuration: { fontFamily: 'Manrope_400Regular', fontSize: 12, color: Colors.onSurfaceVariant },
-  previewMore: { fontFamily: 'Manrope_400Regular', fontSize: 12, color: Colors.outline, marginLeft: 14 },
+  previewItemDuration: { fontFamily: 'Manrope_500Medium', fontSize: 12, color: Colors.onSurfaceVariant },
+  previewMore: { fontFamily: 'Manrope_500Medium', fontSize: 12, color: Colors.outline, marginLeft: 14 },
 });

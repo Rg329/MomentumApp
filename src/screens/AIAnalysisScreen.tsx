@@ -8,7 +8,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/RootNavigator';
 import { Colors, Typography, Spacing, Radius } from '../theme';
 import { TopBar } from '../components/TopBar';
-import { AI_STEPS } from '../data/mockData';
+import { AI_STEPS } from '../data/aiAnalysisSteps';
 import { buildAndSaveUserSchedule } from '../scheduling/scheduleService';
 import { useAppStore } from '../store/useAppStore';
 
@@ -156,18 +156,14 @@ export function AIAnalysisScreen({ navigation }: Props) {
       setTimeout(async () => {
         if (tasks.length > 0) {
           const result = await buildAndSaveUserSchedule();
+          const scheduledWorkBlocks = result.blocks.filter((b) => b.type === 'deep_work').length;
           if (result.droppedTasks.length > 0) {
             navigation.replace('OverloadAlert', {
               droppedTasks: result.droppedTasks,
-              scheduledCount: result.blocks.length,
+              scheduledCount: scheduledWorkBlocks,
             });
           } else {
-            const { isPremium, hasSeenProOffer } = useAppStore.getState();
-            if (!isPremium && !hasSeenProOffer) {
-              navigation.replace('ProOffer');
-            } else {
-              navigation.replace('MainTabs', { screen: 'Schedule' });
-            }
+            navigation.replace('MainTabs', { screen: 'Schedule' });
           }
         } else {
           useAppStore.setState({ scheduleBlocks: [] });
@@ -384,7 +380,7 @@ const styles = StyleSheet.create({
     marginRight: -5,
   },
   progressLabels: { flexDirection: 'row', justifyContent: 'space-between' },
-  progressLabelLeft: { fontFamily: 'Manrope_400Regular', fontSize: 11, color: Colors.outline },
+  progressLabelLeft: { fontFamily: 'Manrope_500Medium', fontSize: 11, color: Colors.outline },
   progressPct:       { fontFamily: 'Manrope_700Bold', fontSize: 11, color: Colors.primary },
 
   // Skeleton

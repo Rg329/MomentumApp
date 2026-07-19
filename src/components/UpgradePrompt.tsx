@@ -117,11 +117,11 @@ const styles = StyleSheet.create({
   proStar:  { fontSize: 10, color: '#fff' },
   proLabel: { fontFamily: 'Manrope_700Bold', fontSize: 10, color: '#fff', letterSpacing: 1 },
   headline: { fontFamily: 'Manrope_700Bold', fontSize: 20, color: Colors.onSurface, letterSpacing: -0.3, textAlign: 'center' },
-  hook:     { fontFamily: 'Manrope_400Regular', fontSize: 14, color: Colors.onSurfaceVariant, textAlign: 'center', lineHeight: 21 },
+  hook:     { fontFamily: 'Manrope_500Medium', fontSize: 14, color: Colors.onSurfaceVariant, textAlign: 'center', lineHeight: 21 },
   featureList:{ width: '100%', gap: 8, backgroundColor: Colors.surfaceContainerLow, borderRadius: Radius.lg, padding: 14 },
   featureRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   featureText:{ fontFamily: 'Manrope_500Medium', fontSize: 13, color: Colors.onSurface },
-  moreLine:   { fontFamily: 'Manrope_400Regular', fontSize: 11, color: Colors.outline, paddingTop: 4 },
+  moreLine:   { fontFamily: 'Manrope_500Medium', fontSize: 11, color: Colors.outline, paddingTop: 4 },
   upgradeBtn: {
     width: '100%', backgroundColor: PREMIUM_COLOR,
     paddingVertical: 16, borderRadius: Radius.xl,

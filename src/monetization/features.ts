@@ -1,6 +1,6 @@
 import type { FeatureDef, FeatureId, PricingPlan } from './types';
 
-export const FREE_GENERATION_LIMIT = 1;
+export const FREE_GENERATION_LIMIT = 3;
 
 // Premium accent color — distinct from app's primary blue
 export const PREMIUM_COLOR = '#6366f1'; // indigo-500
@@ -26,8 +26,8 @@ export const FEATURES: Record<FeatureId, FeatureDef> = {
   advanced_optimization: {
     id:          'advanced_optimization',
     name:        'Advanced Optimization',
-    description: 'AI arranges tasks for maximum flow — matching energy, difficulty, and resistance patterns.',
-    promptHook:  'Advanced Optimization builds schedules that feel effortless.',
+    description: 'AI arranges tasks using your real completion patterns — peak focus, block size, and follow-through.',
+    promptHook:  'Behavioral replanning adapts each schedule to how you actually work.',
     plan:        'premium',
     icon:        'lightning-bolt',
   },

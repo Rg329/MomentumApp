@@ -18,7 +18,7 @@ const corsHeaders = {
 };
 
 // Hard ceiling per user per calendar day (server-side guard against abuse).
-// Free clients enforce 1/day; this allows some headroom for legitimate premium use
+// Free clients enforce 3/day; server allows headroom for premium regenerations.
 // while blocking anyone trying to hammer the endpoint programmatically.
 const DAILY_SERVER_LIMIT = 10;
 
@@ -97,6 +97,8 @@ Deno.serve(async (req) => {
       deadlines,
       behavioralContext,
       scheduleHints,
+      proOptimization,
+      proOptimizationRules,
     } = await req.json();
 
     const client = new Anthropic({ apiKey: Deno.env.get('ANTHROPIC_API_KEY') });
@@ -143,9 +145,14 @@ Deno.serve(async (req) => {
           `Chunk threshold: ${scheduleHints.chunkThresholdMinutes ?? 'default'} min`,
           `Break large tasks: ${scheduleHints.breakLargeTasks ? 'yes' : 'no'}`,
           `Energy pattern: ${scheduleHints.energyPattern ?? 'balanced'}`,
+          scheduleHints.bufferMultiplier ? `Time buffer multiplier: ${scheduleHints.bufferMultiplier}` : null,
           scheduleHints.scheduleRationale ? `Rationale: ${scheduleHints.scheduleRationale}` : null,
         ].filter(Boolean).join('\n')
       : '  Use default scheduling heuristics.';
+
+    const proRulesText = proOptimization && Array.isArray(proOptimizationRules) && proOptimizationRules.length
+      ? (proOptimizationRules as string[]).map((r) => `  - ${r}`).join('\n')
+      : null;
 
     const prompt = `You are Momentum, a productivity coach building a personalised daily schedule.
 
@@ -154,13 +161,13 @@ USER PROFILE:
 - Peak energy time: ${peakTime ?? 'morning'}
 - Day starts: ${wakeStr}
 - Day ends: ${sleepStr}
-
+${proOptimization ? '\nPRO SUBSCRIBER — apply behavioral replanning (this is a paid feature). Follow PRO RULES below strictly.\n' : ''}
 BEHAVIORAL INTELLIGENCE (from real task events — prioritize over generic advice):
 ${behaviorText}
 
 SCHEDULE ADJUSTMENTS (apply these constraints):
 ${hintsText}
-
+${proRulesText ? `\nPRO BEHAVIORAL REPLANNING RULES (must follow):\n${proRulesText}\n` : ''}
 TASKS TO SCHEDULE:
 ${tasksText}
 
@@ -176,9 +183,11 @@ SCHEDULING RULES:
 3. Add a 10-min break after every 45–90 min of work.
 4. Add a 30-min "Lunch & Rest" block near 12:30 if it fits in the day.
 5. Never place tasks during blocked slots.
-6. Tasks with upcoming deadlines get a "Due Soon" tag and higher priority.
-7. Write each description as direct coaching advice in second person ("You'll...","Start by...","Your energy...").
-8. Keep descriptions under 12 words — punchy, not verbose.
+6. Include EVERY fixed commitment from BLOCKED TIME SLOTS as a "meeting" block at its exact start time and duration.
+7. Include EVERY deadline from UPCOMING DEADLINES as an "insight" block at the deadline time (title = task name).
+8. Tasks with upcoming deadlines get a "Due Soon" tag and higher priority.
+9. Write each description as direct coaching advice in second person ("You'll...","Start by...","Your energy...").
+10. Keep descriptions under 12 words — punchy, not verbose.
 
 OUTPUT: Respond ONLY with raw JSON (no markdown fences, no explanation). Use this exact schema:
 {

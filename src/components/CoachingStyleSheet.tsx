@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { ONBOARDING_OPTIONS } from '../data/mockData';
+import { ONBOARDING_OPTIONS } from '../data/onboardingOptions';
 import { Colors, Typography, Spacing, Radius } from '../theme';
 
 const SAMPLE_LINES: Record<string, string> = {
@@ -127,7 +127,7 @@ const styles = StyleSheet.create({
     color: Colors.onSurface,
   },
   sampleLine: {
-    fontFamily: 'Manrope_400Regular',
+    fontFamily: 'Manrope_500Medium',
     fontSize: 13,
     lineHeight: 19,
     color: Colors.onSurfaceVariant,

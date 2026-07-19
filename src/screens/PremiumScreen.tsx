@@ -325,7 +325,7 @@ const styles = StyleSheet.create({
   proStar:     { fontSize: 10, color: '#fff' },
   proLabel:    { fontFamily: 'Manrope_700Bold', fontSize: 10, color: '#fff', letterSpacing: 1.2 },
   heroTitle:   { fontFamily: 'Manrope_800ExtraBold', fontSize: 28, lineHeight: 36, letterSpacing: -0.7, color: Colors.onSurface, textAlign: 'center' },
-  heroSub:     { fontFamily: 'Manrope_400Regular', fontSize: 14, color: Colors.onSurfaceVariant, textAlign: 'center', lineHeight: 21 },
+  heroSub:     { fontFamily: 'Manrope_500Medium', fontSize: 14, color: Colors.onSurfaceVariant, textAlign: 'center', lineHeight: 21 },
 
   // Features
   featureSection: { gap: 8 },
@@ -340,7 +340,7 @@ const styles = StyleSheet.create({
   featIconWrap:{ width: 38, height: 38, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   featText:    { flex: 1, gap: 2 },
   featName:    { fontFamily: 'Manrope_700Bold', fontSize: 13.5, color: Colors.onSurface },
-  featDesc:    { fontFamily: 'Manrope_400Regular', fontSize: 12, color: Colors.onSurfaceVariant, lineHeight: 17 },
+  featDesc:    { fontFamily: 'Manrope_500Medium', fontSize: 12, color: Colors.onSurfaceVariant, lineHeight: 17 },
 
   // Pricing
   pricingSection: { gap: 10 },
@@ -358,7 +358,7 @@ const styles = StyleSheet.create({
   planLabelActive: { color: PREMIUM_COLOR },
   planPrice:       { fontFamily: 'Manrope_800ExtraBold', fontSize: 17, color: Colors.onSurface, letterSpacing: -0.3 },
   planPriceActive: { color: PREMIUM_COLOR },
-  planPeriod:      { fontFamily: 'Manrope_400Regular', fontSize: 10, color: Colors.outline },
+  planPeriod:      { fontFamily: 'Manrope_500Medium', fontSize: 10, color: Colors.outline },
   planPeriodActive:{ color: PREMIUM_COLOR + 'cc' },
   planSavings:     { fontFamily: 'Manrope_700Bold', fontSize: 9, color: PREMIUM_COLOR + 'cc', marginTop: 1 },
 
@@ -374,7 +374,7 @@ const styles = StyleSheet.create({
   compareColLabel:   { fontFamily: 'Manrope_700Bold', fontSize: 12, color: Colors.onSurface },
   comparePremiumLabel: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   compareRow:  { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  compareText: { fontFamily: 'Manrope_400Regular', fontSize: 12, color: Colors.onSurfaceVariant, flex: 1 },
+  compareText: { fontFamily: 'Manrope_500Medium', fontSize: 12, color: Colors.onSurfaceVariant, flex: 1 },
 
   // Coming soon
   comingSoonCard: {
@@ -390,7 +390,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   comingSoonTitle: { fontFamily: 'Manrope_700Bold', fontSize: 17, color: Colors.onSurface, textAlign: 'center' },
-  comingSoonSub:   { fontFamily: 'Manrope_400Regular', fontSize: 13, color: Colors.onSurfaceVariant, textAlign: 'center', lineHeight: 20 },
+  comingSoonSub:   { fontFamily: 'Manrope_500Medium', fontSize: 13, color: Colors.onSurfaceVariant, textAlign: 'center', lineHeight: 20 },
   comingSoonBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: PREMIUM_COLOR + '10', borderRadius: 50, paddingHorizontal: 12, paddingVertical: 6 },
   comingSoonBadgeText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, color: PREMIUM_COLOR },
 
@@ -408,9 +408,9 @@ const styles = StyleSheet.create({
   ctaBtnShine: { position: 'absolute', top: -18, left: 30, width: 90, height: 54, borderRadius: 27, backgroundColor: 'rgba(255,255,255,0.10)', transform: [{ rotate: '25deg' }] },
   ctaBtnLabel: { fontFamily: 'Manrope_700Bold', fontSize: 16, color: '#fff', letterSpacing: 0.1 },
   ctaBtnArrow: { width: 26, height: 26, borderRadius: 13, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
-  trialNote:   { fontFamily: 'Manrope_400Regular', fontSize: 12, color: Colors.outline, textAlign: 'center' },
+  trialNote:   { fontFamily: 'Manrope_500Medium', fontSize: 12, color: Colors.outline, textAlign: 'center' },
   subscriptionLegal: {
-    fontFamily: 'Manrope_400Regular',
+    fontFamily: 'Manrope_500Medium',
     fontSize: 11,
     color: Colors.outline,
     textAlign: 'center',
@@ -421,6 +421,6 @@ const styles = StyleSheet.create({
   restoreLbl:  { fontFamily: 'Manrope_500Medium', fontSize: 12, color: Colors.outline, textDecorationLine: 'underline' },
   legalRow:    { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 },
   legalLink:   { fontFamily: 'Manrope_500Medium', fontSize: 11, color: Colors.outline, textDecorationLine: 'underline' },
-  legalSep:    { fontFamily: 'Manrope_400Regular', fontSize: 11, color: Colors.outline },
+  legalSep:    { fontFamily: 'Manrope_500Medium', fontSize: 11, color: Colors.outline },
   ctaBtnDisabled: { opacity: 0.75 },
 });

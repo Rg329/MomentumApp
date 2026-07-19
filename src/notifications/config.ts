@@ -1,2 +1,2 @@
-/** Set to `true` when testing in a dev build / APK. Off for Expo Go. */
-export const NOTIFICATIONS_ENABLED = false;
+/** Enabled for dev client / preview APK builds. Off in Expo Go (native module unavailable). */
+export const NOTIFICATIONS_ENABLED = true;

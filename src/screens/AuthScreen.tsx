@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity,
   ActivityIndicator, ScrollView,
@@ -6,15 +6,20 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import type { Session } from '@supabase/supabase-js';
 import { RootStackParamList } from '../navigation/RootNavigator';
 import { Colors, Typography, Spacing, Radius, Shadow } from '../theme';
 import { supabase } from '../supabase/client';
 import { formatSupabaseAuthError } from '../supabase/config';
 import { useAppStore } from '../store/useAppStore';
 import { runPostSignInSync } from '../auth/onSignInSync';
+import { trackFunnelEvent } from '../analytics/funnelTracker';
+import { GoogleSignInCancelledError, signInWithGoogle } from '../auth/googleSignIn';
+import { GoogleLogo } from '../components/GoogleLogo';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Auth'>;
 type Step = 'email' | 'otp';
+type LoadingMode = 'email' | 'otp' | 'google' | null;
 
 function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
@@ -24,11 +29,12 @@ export function AuthScreen({ navigation, route }: Props) {
   const fromSavePrompt = route.params?.fromSavePrompt ?? false;
   const fromCheckIn = route.params?.fromCheckIn ?? false;
   const fromInsights = route.params?.fromInsights ?? false;
-  const { account, setAccount, dismissSavePrompt } = useAppStore();
+  const fromDemoHandoff = route.params?.fromDemoHandoff ?? false;
+  const { account, setAccount, dismissSavePrompt, clearDemoPlanAndTasks } = useAppStore();
   const [step, setStep] = useState<Step>('email');
   const [email, setEmail] = useState(account.email ?? '');
   const [otp, setOtp] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState<LoadingMode>(null);
   const [error, setError] = useState<string | null>(null);
   const [resendCooldown, setResendCooldown] = useState(0);
   const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -42,17 +48,28 @@ export function AuthScreen({ navigation, route }: Props) {
   // Listen for auth state changes (handles magic link fallback)
   useEffect(() => {
     const { data: authSub } = supabase.auth.onAuthStateChange((event, session) => {
-      if (session && event === 'SIGNED_IN') completeSignIn(session.user.email);
+      if (session && event === 'SIGNED_IN') completeSignIn(session.user.email, session);
     });
     return () => authSub.subscription.unsubscribe();
   }, []);
 
-  const completeSignIn = async (signedInEmail: string | null | undefined) => {
+  const completeSignIn = async (
+    signedInEmail: string | null | undefined,
+    session?: Session | null,
+  ) => {
     if (handledSession.current) return;
     handledSession.current = true;
     const normalizedEmail = (signedInEmail ?? email).trim().toLowerCase();
+    const meta = session?.user?.user_metadata;
+    const nameFromProvider =
+      (typeof meta?.full_name === 'string' && meta.full_name.trim()) ||
+      (typeof meta?.name === 'string' && meta.name.trim()) ||
+      null;
+    const resolvedName = account.name ?? nameFromProvider;
+
     setAccount({
       email: normalizedEmail,
+      name: resolvedName,
       createdAt: account.createdAt ?? new Date().toISOString(),
     });
 
@@ -75,7 +92,42 @@ export function AuthScreen({ navigation, route }: Props) {
       navigation.replace('MainTabs', { screen: 'Insights' });
       return;
     }
+    if (fromDemoHandoff) {
+      const { isPremium, hasSeenProOffer } = useAppStore.getState();
+      if (!isPremium && !hasSeenProOffer) {
+        navigation.replace('ProOffer', { fromDemoHandoff: true });
+        return;
+      }
+      clearDemoPlanAndTasks();
+      trackFunnelEvent('demo_handoff_cleared');
+      navigation.replace('MainTabs', { screen: 'Focus' });
+      return;
+    }
+    if (resolvedName) {
+      navigation.replace('MainTabs', { screen: 'Focus' });
+      return;
+    }
     navigation.replace('Credentials');
+  };
+
+  const isBusy = loading !== null;
+
+  const handleGoogleSignIn = async () => {
+    if (isBusy) return;
+    setLoading('google');
+    setError(null);
+    handledSession.current = false;
+
+    try {
+      const session = await signInWithGoogle();
+      await completeSignIn(session.user.email, session);
+    } catch (e: unknown) {
+      if (e instanceof GoogleSignInCancelledError) return;
+      setError(formatSupabaseAuthError(e));
+      handledSession.current = false;
+    } finally {
+      setLoading(null);
+    }
   };
 
   const startResendCooldown = (seconds = 60) => {
@@ -95,7 +147,7 @@ export function AuthScreen({ navigation, route }: Props) {
 
   const sendOtp = async () => {
     if (!isValidEmail(email) || resendCooldown > 0) return;
-    setLoading(true);
+    setLoading('email');
     setError(null);
     setOtp('');
     handledSession.current = false;
@@ -112,14 +164,14 @@ export function AuthScreen({ navigation, route }: Props) {
     } catch (e: unknown) {
       setError(formatSupabaseAuthError(e));
     } finally {
-      setLoading(false);
+      setLoading(null);
     }
   };
 
   const verifyOtp = async () => {
     const code = otp.trim();
-    if (code.length < 6 || loading) return;
-    setLoading(true);
+    if (code.length < 6 || isBusy) return;
+    setLoading('otp');
     setError(null);
     handledSession.current = false;
 
@@ -130,11 +182,11 @@ export function AuthScreen({ navigation, route }: Props) {
         type: 'email',
       });
       if (e) throw e;
-      if (data.session) completeSignIn(data.session.user.email);
+      if (data.session) completeSignIn(data.session.user.email, data.session);
     } catch (e: unknown) {
       setError(formatSupabaseAuthError(e));
     } finally {
-      setLoading(false);
+      setLoading(null);
     }
   };
 
@@ -160,26 +212,62 @@ export function AuthScreen({ navigation, route }: Props) {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        {/* ── Hero ── */}
+        {/* -- Hero -- */}
         <View style={styles.hero}>
           <Text style={styles.kicker}>
-            {fromSavePrompt ? 'SAVE YOUR PLAN' : 'WELCOME TO MOMENTUM'}
+            {fromSavePrompt
+              ? 'SAVE YOUR PLAN'
+              : fromDemoHandoff
+                ? 'YOUR TASKS'
+                : 'WELCOME TO MOMENTUM'}
           </Text>
           <Text style={styles.title}>
             {step === 'email'
-              ? (fromSavePrompt ? 'Back up today\'s\nplan' : 'Sign in to\ncontinue')
+              ? (fromSavePrompt
+                ? 'Back up today\'s\nplan'
+                : fromDemoHandoff
+                  ? 'Sign in to add\nyour tasks'
+                  : 'Sign in to\ncontinue')
               : 'Enter your\ncode'}
           </Text>
           <Text style={styles.sub}>
             {step === 'email'
               ? (fromSavePrompt
-                ? 'Sign in with a one-time code — your tasks and schedule sync to your account.'
-                : 'We will send a sign-in code to your email. No password needed.')
+                ? 'Sign in with a one-time code � your tasks and schedule sync to your account.'
+                : fromDemoHandoff
+                  ? 'Sign in to clear the sample plan and add your own tasks. Everything syncs to your account.'
+                  : 'We will send a sign-in code to your email. No password needed.')
               : `We sent a code to\n${email.trim().toLowerCase()}`}
           </Text>
         </View>
 
-        {/* ── Card ── */}
+        {/* -- Card -- */}
+        {step === 'email' ? (
+          <>
+            <TouchableOpacity
+              style={[styles.googleBtn, isBusy && styles.googleBtnDisabled]}
+              onPress={handleGoogleSignIn}
+              disabled={isBusy}
+              activeOpacity={0.88}
+            >
+              {loading === 'google' ? (
+                <ActivityIndicator color={Colors.onSurface} />
+              ) : (
+                <>
+                  <GoogleLogo size={20} />
+                  <Text style={styles.googleBtnLabel}>Continue with Google</Text>
+                </>
+              )}
+            </TouchableOpacity>
+
+            <View style={styles.dividerRow}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>or use email</Text>
+              <View style={styles.dividerLine} />
+            </View>
+          </>
+        ) : null}
+
         <View style={styles.card}>
           {step === 'email' ? (
             <>
@@ -193,7 +281,7 @@ export function AuthScreen({ navigation, route }: Props) {
                 autoCapitalize="none"
                 autoCorrect={false}
                 style={styles.input}
-                editable={!loading}
+                editable={!isBusy}
                 returnKeyType="send"
                 onSubmitEditing={sendOtp}
               />
@@ -204,7 +292,7 @@ export function AuthScreen({ navigation, route }: Props) {
                 <View style={styles.otpIcon}>
                   <MaterialCommunityIcons name="email-check-outline" size={26} color={Colors.primary} />
                 </View>
-                <Text style={styles.otpIconLabel}>Code sent — check your inbox</Text>
+                <Text style={styles.otpIconLabel}>Code sent � check your inbox</Text>
               </View>
 
               <Text style={styles.label}>Sign-in code</Text>
@@ -220,7 +308,7 @@ export function AuthScreen({ navigation, route }: Props) {
                 placeholderTextColor={Colors.outline}
                 keyboardType="number-pad"
                 style={[styles.input, styles.otpInput]}
-                editable={!loading}
+                editable={!isBusy}
                 returnKeyType="done"
                 onSubmitEditing={verifyOtp}
                 maxLength={8}
@@ -234,15 +322,15 @@ export function AuthScreen({ navigation, route }: Props) {
           {error ? <Text style={styles.error}>{error}</Text> : null}
         </View>
 
-        {/* ── CTA ── */}
+        {/* -- CTA -- */}
         {step === 'email' ? (
           <TouchableOpacity
             style={[styles.cta, !canSend && styles.ctaDisabled]}
             onPress={sendOtp}
-            disabled={!canSend || loading}
+            disabled={!canSend || isBusy}
             activeOpacity={0.88}
           >
-            {loading
+            {loading === 'email'
               ? <ActivityIndicator color="#fff" />
               : <Text style={styles.ctaLabel}>Send code</Text>}
           </TouchableOpacity>
@@ -251,10 +339,10 @@ export function AuthScreen({ navigation, route }: Props) {
             <TouchableOpacity
               style={[styles.cta, !canVerify && styles.ctaDisabled]}
               onPress={verifyOtp}
-              disabled={!canVerify || loading}
+              disabled={!canVerify || isBusy}
               activeOpacity={0.88}
             >
-              {loading
+              {loading === 'otp'
                 ? <ActivityIndicator color="#fff" />
                 : <Text style={styles.ctaLabel}>Verify code</Text>}
             </TouchableOpacity>
@@ -262,7 +350,7 @@ export function AuthScreen({ navigation, route }: Props) {
             <TouchableOpacity
               style={styles.secondary}
               onPress={sendOtp}
-              disabled={resendCooldown > 0 || loading}
+              disabled={resendCooldown > 0 || isBusy}
               activeOpacity={0.85}
             >
               <Text style={[styles.secondaryLabel, resendCooldown > 0 && { color: Colors.outline + '80' }]}>
@@ -273,7 +361,7 @@ export function AuthScreen({ navigation, route }: Props) {
             <TouchableOpacity
               style={styles.secondary}
               onPress={() => { setStep('email'); setError(null); setOtp(''); }}
-              disabled={loading}
+              disabled={isBusy}
               activeOpacity={0.85}
             >
               <Text style={styles.secondaryLabel}>Use a different email</Text>
@@ -281,21 +369,6 @@ export function AuthScreen({ navigation, route }: Props) {
           </View>
         )}
 
-        <TouchableOpacity
-          style={styles.secondary}
-          onPress={() => {
-            if (fromSavePrompt) {
-              dismissSavePrompt();
-              navigation.replace('MainTabs', { screen: 'Schedule' });
-            } else {
-              navigation.replace('MainTabs', { screen: 'Focus' });
-            }
-          }}
-          disabled={loading}
-          activeOpacity={0.85}
-        >
-          <Text style={styles.secondaryLabel}>Skip for now</Text>
-        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
@@ -330,6 +403,42 @@ const styles = StyleSheet.create({
   kicker: { ...Typography.labelSm, color: Colors.primary, textTransform: 'uppercase', letterSpacing: 1.6, fontSize: 10 },
   title: { ...Typography.displayLg, color: Colors.onSurface, fontSize: 30, lineHeight: 36 },
   sub: { ...Typography.bodyLg, color: Colors.onSurfaceVariant, lineHeight: 24, maxWidth: 340 },
+  googleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    backgroundColor: Colors.surfaceContainerLowest,
+    borderRadius: Radius.xl,
+    paddingVertical: 16,
+    borderWidth: 1,
+    borderColor: Colors.outlineVariant + '55',
+    ...Shadow.card,
+  },
+  googleBtnDisabled: { opacity: 0.55 },
+  googleBtnLabel: {
+    fontFamily: 'Manrope_700Bold',
+    fontSize: 15,
+    color: Colors.onSurface,
+    letterSpacing: 0.1,
+  },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  dividerLine: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: Colors.outlineVariant + '80',
+  },
+  dividerText: {
+    fontFamily: 'Manrope_600SemiBold',
+    fontSize: 11,
+    color: Colors.outline,
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
   card: {
     backgroundColor: Colors.surfaceContainerLowest,
     borderRadius: Radius.xl,
@@ -363,7 +472,7 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   otpIconLabel: { fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: Colors.onSurface, flex: 1 },
-  otpHint: { fontFamily: 'Manrope_400Regular', fontSize: 12, color: Colors.outline },
+  otpHint: { fontFamily: 'Manrope_500Medium', fontSize: 12, color: Colors.outline },
   error: { ...Typography.bodyMd, color: Colors.error, marginTop: 4 },
   cta: {
     backgroundColor: Colors.primary,

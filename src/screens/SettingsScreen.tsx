@@ -33,6 +33,7 @@ import { minutesToDisplayTime, durationMinutesLabel } from '../utils/formatTime'
 import { NOTIFICATIONS_ENABLED } from '../notifications/config';
 import { ensureNotificationPermissionsIfEnabled } from '../notifications/safeEntry';
 import { useAuthSession } from '../auth/useAuthSession';
+import { AppTourModal } from '../components/AppTourModal';
 
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
 
@@ -153,9 +154,9 @@ const cardStyles = StyleSheet.create({
   activeBadge: { backgroundColor: PREMIUM_COLOR, borderRadius: 50, paddingHorizontal: 8, paddingVertical: 2, alignSelf: 'flex-start', marginBottom: 2 },
   activeBadgeText: { fontFamily: 'Manrope_700Bold', fontSize: 9, color: '#fff', letterSpacing: 0.8 },
   activeTitle: { fontFamily: 'Manrope_700Bold', fontSize: 15, color: Colors.onSurface },
-  activeSub:   { fontFamily: 'Manrope_400Regular', fontSize: 12, color: Colors.onSurfaceVariant },
+  activeSub:   { fontFamily: 'Manrope_500Medium', fontSize: 12, color: Colors.onSurfaceVariant },
   upgradeTitle: { fontFamily: 'Manrope_700Bold', fontSize: 15, color: Colors.onSurface },
-  upgradeSub:   { fontFamily: 'Manrope_400Regular', fontSize: 12, color: Colors.onSurfaceVariant, lineHeight: 17 },
+  upgradeSub:   { fontFamily: 'Manrope_500Medium', fontSize: 12, color: Colors.onSurfaceVariant, lineHeight: 17 },
 });
 
 function SignInCard({
@@ -287,6 +288,7 @@ export function SettingsScreen() {
     setWakeTime,
     setPreferences,
     resetStore,
+    markAppTourSeen,
   } = useAppStore();
   const pm = usePremium();
   const isPremium = pm.isPremium;
@@ -297,6 +299,7 @@ export function SettingsScreen() {
   const [upgradeFeature, setUpgradeFeature] = useState<FeatureId>('adaptive_coaching');
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [infoModal, setInfoModal] = useState<'privacy' | 'profile' | null>(null);
+  const [showAppTour, setShowAppTour] = useState(false);
 
   const coachStyleLabel = prettyCoachStyle(p.profile.coachStyle);
   const peakTimeLabel   = prettyPeakTime(p.profile.peakTime);
@@ -469,6 +472,17 @@ export function SettingsScreen() {
               Alert.alert('Could not open Terms of Service', TERMS_OF_SERVICE_URL);
             });
           },
+        },
+      ],
+    },
+    {
+      title: 'Help',
+      items: [
+        {
+          label: 'How Momentum works',
+          value: 'App tour',
+          icon: 'map-search-outline',
+          onPress: () => setShowAppTour(true),
         },
       ],
     },
@@ -741,6 +755,15 @@ export function SettingsScreen() {
         body={profileBody}
         onClose={() => setInfoModal(null)}
       />
+
+      <AppTourModal
+        visible={showAppTour}
+        onClose={() => setShowAppTour(false)}
+        onComplete={() => {
+          markAppTourSeen();
+          setShowAppTour(false);
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -789,7 +812,7 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   settingLabel:  { ...Typography.bodyMd, color: Colors.onSurface, fontFamily: 'Manrope_600SemiBold' },
-  lockedNote:    { fontFamily: 'Manrope_400Regular', fontSize: 11, color: PREMIUM_COLOR + 'bb' },
+  lockedNote:    { fontFamily: 'Manrope_500Medium', fontSize: 11, color: PREMIUM_COLOR + 'bb' },
   settingRight:  { flexDirection: 'row', alignItems: 'center', gap: 6 },
   settingValue:  { ...Typography.bodyMd, color: Colors.secondary },
   genCounter: {
@@ -797,7 +820,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surfaceContainerLow,
     borderRadius: Radius.lg, paddingHorizontal: 14, paddingVertical: 10,
   },
-  genCounterText: { fontFamily: 'Manrope_400Regular', fontSize: 12, color: Colors.outline },
+  genCounterText: { fontFamily: 'Manrope_500Medium', fontSize: 12, color: Colors.outline },
   devReset: {
     flexDirection: 'row',
     alignItems: 'center',

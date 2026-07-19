@@ -222,7 +222,7 @@ const styles = StyleSheet.create({
     color: Colors.onSurface,
   },
   description: {
-    fontFamily: 'Manrope_400Regular',
+    fontFamily: 'Manrope_500Medium',
     fontSize: 13.5, lineHeight: 20.5,
     color: Colors.onSurfaceVariant,
   },
@@ -241,7 +241,7 @@ const styles = StyleSheet.create({
   stepNumText: { fontFamily: 'Manrope_700Bold', fontSize: 11 },
   stepContent: { flex: 1, flexDirection: 'row', alignItems: 'flex-start', gap: 7 },
   stepText: {
-    fontFamily: 'Manrope_400Regular',
+    fontFamily: 'Manrope_500Medium',
     fontSize: 13, lineHeight: 19,
     color: Colors.onSurface, flex: 1,
   },

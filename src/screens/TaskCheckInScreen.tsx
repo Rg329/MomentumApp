@@ -325,7 +325,7 @@ const styles = StyleSheet.create({
     color: Colors.onSurface,
   },
   cardSub: {
-    fontFamily: 'Manrope_400Regular',
+    fontFamily: 'Manrope_500Medium',
     fontSize: 13,
     lineHeight: 19,
     color: Colors.onSurfaceVariant,
@@ -369,7 +369,7 @@ const styles = StyleSheet.create({
     color: Colors.onSurface,
   },
   statusSub: {
-    fontFamily: 'Manrope_400Regular',
+    fontFamily: 'Manrope_500Medium',
     fontSize: 13,
     textAlign: 'center',
     color: Colors.onSurfaceVariant,

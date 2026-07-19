@@ -96,9 +96,9 @@ const lockedStyles = StyleSheet.create({
   },
   iconRing: { width: 44, height: 44, borderRadius: 22, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center', backgroundColor: PREMIUM_COLOR + '0c' },
   title:     { fontFamily: 'Manrope_700Bold', fontSize: 15, color: Colors.onSurface },
-  desc:      { fontFamily: 'Manrope_400Regular', fontSize: 12, color: Colors.onSurfaceVariant, textAlign: 'center', maxWidth: 240 },
+  desc:      { fontFamily: 'Manrope_500Medium', fontSize: 12, color: Colors.onSurfaceVariant, textAlign: 'center', maxWidth: 240 },
   previewWrap: { flex: 1, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8, overflow: 'hidden' },
-  previewText: { fontFamily: 'Manrope_400Regular', fontSize: 13, color: Colors.onSurfaceVariant, lineHeight: 20 },
+  previewText: { fontFamily: 'Manrope_500Medium', fontSize: 13, color: Colors.onSurfaceVariant, lineHeight: 20 },
   previewFade: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 40 },
   previewUnlock: { fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: PREMIUM_COLOR, paddingHorizontal: 16, paddingBottom: 14 },
 });
@@ -141,7 +141,7 @@ const bannerStyles = StyleSheet.create({
   left:     { flexDirection: 'row', alignItems: 'center', gap: 10 },
   iconWrap: { width: 36, height: 36, borderRadius: 10, backgroundColor: PREMIUM_COLOR, alignItems: 'center', justifyContent: 'center' },
   title:    { fontFamily: 'Manrope_700Bold', fontSize: 13.5, color: Colors.onSurface },
-  sub:      { fontFamily: 'Manrope_400Regular', fontSize: 11, color: Colors.onSurfaceVariant, marginTop: 1 },
+  sub:      { fontFamily: 'Manrope_500Medium', fontSize: 11, color: Colors.onSurfaceVariant, marginTop: 1 },
   arrow:    { width: 30, height: 30, borderRadius: 15, backgroundColor: PREMIUM_COLOR + '18', alignItems: 'center', justifyContent: 'center' },
 });
 
@@ -195,7 +195,7 @@ const signInBannerStyles = StyleSheet.create({
     justifyContent: 'center',
   },
   title: { fontFamily: 'Manrope_700Bold', fontSize: 14, color: Colors.onSurface },
-  sub: { fontFamily: 'Manrope_400Regular', fontSize: 12, color: Colors.onSurfaceVariant, marginTop: 2, lineHeight: 17 },
+  sub: { fontFamily: 'Manrope_500Medium', fontSize: 12, color: Colors.onSurfaceVariant, marginTop: 2, lineHeight: 17 },
   arrow: {
     width: 32,
     height: 32,
@@ -625,12 +625,12 @@ const styles = StyleSheet.create({
   },
   weeklyStatVal: { fontFamily: 'Manrope_700Bold', fontSize: 16, color: Colors.onSurface },
   weeklyStatLbl: { fontFamily: 'Manrope_500Medium', fontSize: 10, color: Colors.onSurfaceVariant, marginTop: 2 },
-  weeklyBody: { fontFamily: 'Manrope_400Regular', fontSize: 13, color: Colors.onSurface, lineHeight: 20 },
+  weeklyBody: { fontFamily: 'Manrope_500Medium', fontSize: 13, color: Colors.onSurface, lineHeight: 20 },
 
   analyticsRow:{ flexDirection: 'row', gap: 8 },
   analyticsCard: { flex: 1, backgroundColor: PREMIUM_COLOR + '0c', borderRadius: Radius.lg, padding: 14, alignItems: 'center', gap: 4, borderWidth: 1, borderColor: PREMIUM_COLOR + '20' },
   analyticsVal:  { fontFamily: 'Manrope_800ExtraBold', fontSize: 22, color: PREMIUM_COLOR, letterSpacing: -0.5 },
-  analyticsLbl:  { fontFamily: 'Manrope_400Regular', fontSize: 10, color: Colors.onSurfaceVariant, textAlign: 'center' },
+  analyticsLbl:  { fontFamily: 'Manrope_500Medium', fontSize: 10, color: Colors.onSurfaceVariant, textAlign: 'center' },
 
   completeCta: {
     backgroundColor: Colors.primary, paddingVertical: 18,

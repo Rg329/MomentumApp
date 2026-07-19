@@ -87,8 +87,28 @@ function peakWindowForWake(wakeTime: number, sleepTimeMinutes: number, peakTime:
     const end = Math.max(wakeTime + 180, sleepTimeMinutes - 180);
     return { start: Math.max(wakeTime + 120, end - duration), end };
   }
-  // afternoon or default — ~2.75h after wake (matches CircadianRhythmPicker aura)
+  // afternoon or default — ~2.75h after wake
   return { start: wakeTime + 165, end: wakeTime + 165 + duration };
+}
+
+/** Shared peak-focus window for scheduling and wake/sleep UI. */
+export function computePeakFocusWindow(
+  wakeTimeMinutes: number,
+  sleepTimeMinutes: number,
+  peakTime: PeakTime | string | null,
+): { start: number; end: number } {
+  const normalized =
+    peakTime === 'morning' || peakTime === 'afternoon' || peakTime === 'evening'
+      ? peakTime
+      : null;
+  return peakWindowForWake(wakeTimeMinutes, sleepTimeMinutes, normalized);
+}
+
+export function peakTimeDisplayLabel(peakTime: PeakTime | string | null): string {
+  if (peakTime === 'morning') return 'morning';
+  if (peakTime === 'afternoon') return 'afternoon';
+  if (peakTime === 'evening') return 'evening';
+  return 'mid-day';
 }
 
 function energyArc(peakTime: PeakTime | null): BehaviorProfile['energyArc'] {

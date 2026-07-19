@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, Radius, Shadow } from '../theme';
 import { CircadianRhythmPicker } from './CircadianRhythmPicker';
+import { useAppStore } from '../store/useAppStore';
 
 type Props = {
   visible: boolean;
@@ -34,6 +35,8 @@ export function WakeSleepSheet({
   onConfirm,
   onDismiss,
 }: Props) {
+  const peakTime = useAppStore((s) => s.onboardingData.peakTime);
+
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onDismiss}>
       <Pressable style={styles.backdrop} onPress={onDismiss}>
@@ -56,6 +59,7 @@ export function WakeSleepSheet({
                   <CircadianRhythmPicker
                     wakeTime={wakeTime}
                     sleepTime={sleepTime}
+                    peakTime={peakTime}
                     onWakeTimeChange={onWakeTimeChange}
                     onSleepTimeChange={onSleepTimeChange}
                     showAura={false}

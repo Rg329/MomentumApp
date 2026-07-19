@@ -12,7 +12,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/RootNavigator';
 import { Colors, Typography, Spacing, Radius, Shadow } from '../theme';
-import { ONBOARDING_OPTIONS } from '../data/mockData';
+import { ONBOARDING_OPTIONS } from '../data/onboardingOptions';
 import { useAppStore } from '../store/useAppStore';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Onboarding'>;
@@ -121,10 +121,7 @@ export function OnboardingScreen({ navigation }: Props) {
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <View style={styles.header}>
-        <View style={styles.logoRow}>
-          <View style={styles.logoDot} />
-          <Text style={styles.logoText}>Momentum</Text>
-        </View>
+        <Text style={styles.logoText}>Momentum</Text>
         <View style={styles.progressRow}>
           <View style={styles.progressTrack}>
             <View style={[styles.progressFill, { width: `${progressValue * 100}%` }]} />
@@ -221,8 +218,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: Colors.outlineVariant + '25',
   },
-  logoRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  logoDot: { width: 18, height: 18, borderRadius: 9, backgroundColor: Colors.primary },
   logoText: { ...Typography.headlineSm, color: Colors.primary, fontFamily: 'Manrope_700Bold' },
   progressRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   progressTrack: {

@@ -17,9 +17,9 @@ import { TabNavigator } from './TabNavigator';
 export type RootStackParamList = {
   Splash:       undefined;
   Onboarding:   undefined;
-  Auth:         { fromSavePrompt?: boolean; fromCheckIn?: boolean; fromInsights?: boolean } | undefined;
+  Auth:         { fromSavePrompt?: boolean; fromCheckIn?: boolean; fromInsights?: boolean; fromDemoHandoff?: boolean } | undefined;
   Credentials:  undefined;
-  ProOffer:     { fromOnboarding?: boolean } | undefined;
+  ProOffer:     { fromOnboarding?: boolean; fromDemoHandoff?: boolean } | undefined;
   BrainDump:    undefined;
   Constraints:  undefined;
   AIAnalysis:   undefined;

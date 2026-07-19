@@ -1,7 +1,7 @@
 import type { BehaviorProfile } from './behaviorProfile';
 
 // ─── Core profile enums ────────────────────────────────────────────────────────
-// Values match the option keys in src/data/mockData.ts exactly.
+// Values match the option keys in src/data/onboardingOptions.ts exactly.
 
 /** Primary personalization variable — the user's specific procrastination pattern. */
 export type ProcrastinationType =

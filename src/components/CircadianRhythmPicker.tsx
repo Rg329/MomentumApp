@@ -1,8 +1,12 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { View, Text, StyleSheet, Animated, Easing } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors, Radius } from '../theme';
+import {
+  computePeakFocusWindow,
+  peakTimeDisplayLabel,
+} from '../personalization/behaviorProfile';
 
 function minutesToTime(total: number): string {
   let h = Math.floor(total / 60) % 24;
@@ -34,7 +38,19 @@ function TimeValue({ minutes, size = 22 }: { minutes: number; size?: number }) {
   );
 }
 
-function SleepWindowBar({ wakeTime, sleepTime }: { wakeTime: number; sleepTime: number }) {
+function SleepWindowBar({
+  wakeTime,
+  sleepTime,
+  peakStart,
+  peakEnd,
+  peakLabel,
+}: {
+  wakeTime: number;
+  sleepTime: number;
+  peakStart: number;
+  peakEnd: number;
+  peakLabel: string;
+}) {
   const barAnim = useRef(new Animated.Value(0)).current;
   const focusAnim = useRef(new Animated.Value(0)).current;
 
@@ -46,11 +62,11 @@ function SleepWindowBar({ wakeTime, sleepTime }: { wakeTime: number; sleepTime: 
   }, []);
 
   const awake = Math.max(1, sleepTime - wakeTime);
-  const peakStart = 165;
-  const peakEnd = 285;
+  const peakStartOffset = Math.max(0, Math.min(peakStart - wakeTime, awake));
+  const peakEndOffset = Math.max(peakStartOffset + 15, Math.min(peakEnd - wakeTime, awake));
+  const peakLeftNum = (peakStartOffset / awake) * 100;
+  const peakWidthPct = `${((peakEndOffset - peakStartOffset) / awake) * 100}%` as const;
   const barWidth = barAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] });
-  const peakLeftNum = (peakStart / awake) * 100;
-  const peakWidthPct = `${((peakEnd - peakStart) / awake) * 100}%` as const;
   const focusWidth = focusAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', peakWidthPct] });
 
   return (
@@ -66,7 +82,9 @@ function SleepWindowBar({ wakeTime, sleepTime }: { wakeTime: number; sleepTime: 
         </View>
         <View style={styles.barLabelCenter}>
           <MaterialCommunityIcons name="lightning-bolt" size={10} color={Colors.primary} />
-          <Text style={[styles.barLabelText, { color: Colors.primary }]}>Peak Focus</Text>
+          <Text style={[styles.barLabelText, { color: Colors.primary }]}>
+            Peak Focus · {peakLabel}
+          </Text>
         </View>
         <View style={styles.barLabelRight}>
           <Text style={styles.barLabelText}>{minutesToTime(sleepTime)}</Text>
@@ -77,7 +95,15 @@ function SleepWindowBar({ wakeTime, sleepTime }: { wakeTime: number; sleepTime: 
   );
 }
 
-function AuraCard({ wakeTime }: { wakeTime: number }) {
+function AuraCard({
+  peakStart,
+  peakEnd,
+  peakLabel,
+}: {
+  peakStart: number;
+  peakEnd: number;
+  peakLabel: string;
+}) {
   const glow1 = useRef(new Animated.Value(0)).current;
   const glow2 = useRef(new Animated.Value(0)).current;
 
@@ -94,8 +120,8 @@ function AuraCard({ wakeTime }: { wakeTime: number }) {
     pulse(glow2, 1000);
   }, []);
 
-  const peak1 = minutesToTime(wakeTime + 165);
-  const peak2 = minutesToTime(wakeTime + 285);
+  const peak1 = minutesToTime(peakStart);
+  const peak2 = minutesToTime(peakEnd);
 
   return (
     <View style={styles.auraCard}>
@@ -107,9 +133,9 @@ function AuraCard({ wakeTime }: { wakeTime: number }) {
           <Text style={styles.auraBadgeText}>Momentum Aura</Text>
         </View>
         <Text style={styles.auraText}>
-          Based on your sleep pattern, your{' '}
-          <Text style={styles.auraAccent}>"Peak Focus"</Text>
-          {' '}is predicted between{' '}
+          From your{' '}
+          <Text style={styles.auraAccent}>{peakLabel}</Text>
+          {' '}peak preference, deep focus is predicted between{' '}
           <Text style={styles.auraTime}>{peak1}</Text>
           {' '}and{' '}
           <Text style={styles.auraTime}>{peak2}</Text>.
@@ -126,6 +152,8 @@ function AuraCard({ wakeTime }: { wakeTime: number }) {
 type Props = {
   wakeTime: number;
   sleepTime: number;
+  /** Onboarding peak time: morning | afternoon | evening */
+  peakTime?: string | null;
   onWakeTimeChange: (value: number) => void;
   onSleepTimeChange: (value: number) => void;
   showAura?: boolean;
@@ -134,13 +162,26 @@ type Props = {
 export function CircadianRhythmPicker({
   wakeTime,
   sleepTime,
+  peakTime = null,
   onWakeTimeChange,
   onSleepTimeChange,
   showAura = true,
 }: Props) {
+  const peakWindow = useMemo(
+    () => computePeakFocusWindow(wakeTime, sleepTime, peakTime),
+    [wakeTime, sleepTime, peakTime],
+  );
+  const peakLabel = peakTimeDisplayLabel(peakTime);
+
   return (
     <View style={styles.wrap}>
-      <SleepWindowBar wakeTime={wakeTime} sleepTime={sleepTime} />
+      <SleepWindowBar
+        wakeTime={wakeTime}
+        sleepTime={sleepTime}
+        peakStart={peakWindow.start}
+        peakEnd={peakWindow.end}
+        peakLabel={peakLabel}
+      />
 
       <View style={styles.sliderBlock}>
         <View style={styles.sliderRow}>
@@ -208,7 +249,13 @@ export function CircadianRhythmPicker({
         </Text>
       </View>
 
-      {showAura ? <AuraCard wakeTime={wakeTime} /> : null}
+      {showAura ? (
+        <AuraCard
+          peakStart={peakWindow.start}
+          peakEnd={peakWindow.end}
+          peakLabel={peakLabel}
+        />
+      ) : null}
     </View>
   );
 }
@@ -230,7 +277,7 @@ const styles = StyleSheet.create({
   barLabelCenter: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   barLabelRight: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   barDot: { width: 6, height: 6, borderRadius: 3 },
-  barLabelText: { fontFamily: 'Manrope_500Medium', fontSize: 10, color: Colors.outline },
+  barLabelText: { fontFamily: 'Manrope_600SemiBold', fontSize: 10, color: Colors.outline },
   sectionDivider: { height: StyleSheet.hairlineWidth, backgroundColor: Colors.outlineVariant + '40' },
   sliderBlock: { gap: 2 },
   sliderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
@@ -243,11 +290,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  sliderLabel: { fontFamily: 'Manrope_500Medium', fontSize: 13, color: Colors.onSurfaceVariant },
+  sliderLabel: { fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: Colors.onSurfaceVariant },
   timeVal: { fontFamily: 'Manrope_700Bold', color: Colors.primary },
   slider: { width: '100%', height: 38 },
   sliderRange: { flexDirection: 'row', justifyContent: 'space-between', marginTop: -4 },
-  rangeLabel: { fontFamily: 'Manrope_400Regular', fontSize: 10, color: Colors.outline },
+  rangeLabel: { fontFamily: 'Manrope_500Medium', fontSize: 10, color: Colors.outline },
   hoursRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -257,7 +304,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 7,
   },
-  hoursText: { fontFamily: 'Manrope_500Medium', fontSize: 12, color: Colors.onPrimaryFixedVariant },
+  hoursText: { fontFamily: 'Manrope_600SemiBold', fontSize: 12, color: Colors.onPrimaryFixedVariant },
   hoursAccent: { fontFamily: 'Manrope_700Bold', color: Colors.primary },
   auraCard: {
     borderRadius: Radius.xl,
@@ -278,7 +325,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
     textTransform: 'uppercase',
   },
-  auraText: { fontFamily: 'Manrope_400Regular', fontSize: 13.5, lineHeight: 20, color: Colors.onPrimaryFixedVariant },
+  auraText: { fontFamily: 'Manrope_500Medium', fontSize: 13.5, lineHeight: 20, color: Colors.onPrimaryFixedVariant },
   auraAccent: { fontFamily: 'Manrope_600SemiBold', color: Colors.primary },
   auraTime: { fontFamily: 'Manrope_700Bold', color: Colors.primary },
   auraNote: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 },

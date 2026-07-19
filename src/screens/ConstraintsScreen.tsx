@@ -11,7 +11,6 @@ import { RootStackParamList }    from '../navigation/RootNavigator';
 import { Colors, Typography, Spacing, Radius } from '../theme';
 import { TopBar }       from '../components/TopBar';
 import { Constraint, DeadlineTask, useAppStore } from '../store/useAppStore';
-import { MOCK_CONSTRAINTS, MOCK_DEADLINES } from '../data/mockData';
 import { usePremium } from '../monetization';
 
 const FREE_CONSTRAINTS_LIMIT = 3;
@@ -304,18 +303,14 @@ export function ConstraintsScreen({ navigation }: Props) {
   const { setConstraints, setDeadlines } = useAppStore();
   const pm = usePremium();
 
-  const [commitments, setCommitments]       = useState<Constraint[]>(
-    storedConstraints.length > 0 ? storedConstraints : MOCK_CONSTRAINTS
-  );
+  const [commitments, setCommitments]       = useState<Constraint[]>(storedConstraints);
   const [showModal, setShowModal]           = useState(false);
   const [newTitle,  setNewTitle]            = useState('');
   const [newStart,  setNewStart]            = useState('');
   const [newEnd,    setNewEnd]              = useState('');
 
   // Deadlines state
-  const [deadlines, setDeadlinesLocal]      = useState<DeadlineTask[]>(
-    storedDeadlines.length > 0 ? storedDeadlines : MOCK_DEADLINES
-  );
+  const [deadlines, setDeadlinesLocal]      = useState<DeadlineTask[]>(storedDeadlines);
   const [showDeadlineModal, setShowDeadlineModal] = useState(false);
   const [dlTitle, setDlTitle]               = useState('');
   const [dlHour,   setDlHour]               = useState(4);   // "5" = index 4
@@ -475,26 +470,36 @@ export function ConstraintsScreen({ navigation }: Props) {
         <SectionCard delay={260}>
           <SectionHeader icon="calendar-alert" title="Must Finish Before" num={2} />
 
-          <View style={styles.deadlineList}>
-            {deadlines.map((d, i) => (
-              <View key={d.id} style={[styles.deadlineRow, i % 2 === 1 && { backgroundColor: Colors.primaryFixed + '40' }]}>
-                <View style={styles.deadlineLeft}>
-                  <Text style={styles.deadlineTitle}>{d.title}</Text>
+          {deadlines.length === 0 ? (
+            <View style={styles.emptyCommit}>
+              <MaterialCommunityIcons name="calendar-alert-outline" size={28} color={Colors.outlineVariant} />
+              <Text style={styles.emptyText}>No deadlines yet</Text>
+              <Text style={styles.emptySubText}>
+                Add your deadlines here — use the same task names from your plan
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.deadlineList}>
+              {deadlines.map((d, i) => (
+                <View key={d.id} style={[styles.deadlineRow, i % 2 === 1 && { backgroundColor: Colors.primaryFixed + '40' }]}>
+                  <View style={styles.deadlineLeft}>
+                    <Text style={styles.deadlineTitle}>{d.title}</Text>
+                  </View>
+                  <View style={styles.deadlinePill}>
+                    <MaterialCommunityIcons name="timer-sand" size={11} color={Colors.primary} />
+                    <Text style={styles.deadlineTime}>{d.deadline}</Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => removeDeadline(d.id)}
+                    style={styles.removeBtn}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <MaterialCommunityIcons name="close" size={13} color={Colors.outline} />
+                  </TouchableOpacity>
                 </View>
-                <View style={styles.deadlinePill}>
-                  <MaterialCommunityIcons name="timer-sand" size={11} color={Colors.primary} />
-                  <Text style={styles.deadlineTime}>{d.deadline}</Text>
-                </View>
-                <TouchableOpacity
-                  onPress={() => removeDeadline(d.id)}
-                  style={styles.removeBtn}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <MaterialCommunityIcons name="close" size={13} color={Colors.outline} />
-                </TouchableOpacity>
-              </View>
-            ))}
-          </View>
+              ))}
+            </View>
+          )}
 
           <AddDeadlineButton onPress={() => setShowDeadlineModal(true)} />
         </SectionCard>
@@ -677,7 +682,7 @@ const styles = StyleSheet.create({
   },
   stepBadgeText: { fontFamily: 'Manrope_600SemiBold', fontSize: 11, color: Colors.primary, letterSpacing: 0.3 },
   title:    { fontFamily: 'Manrope_800ExtraBold', fontSize: 28, lineHeight: 36, color: Colors.onSurface, letterSpacing: -0.5 },
-  subtitle: { fontFamily: 'Manrope_400Regular', fontSize: 14, lineHeight: 21, color: Colors.onSurfaceVariant },
+  subtitle: { fontFamily: 'Manrope_500Medium', fontSize: 14, lineHeight: 21, color: Colors.onSurfaceVariant },
 
   // Section card
   section: {
@@ -727,7 +732,7 @@ const styles = StyleSheet.create({
   timeVal:        { fontFamily: 'Manrope_700Bold', color: Colors.primary },
   slider:         { width: '100%', height: 38 },
   sliderRange:    { flexDirection: 'row', justifyContent: 'space-between', marginTop: -4 },
-  rangeLabel:     { fontFamily: 'Manrope_400Regular', fontSize: 10, color: Colors.outline },
+  rangeLabel:     { fontFamily: 'Manrope_500Medium', fontSize: 10, color: Colors.outline },
   hoursRow:       { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: Colors.primaryFixed + '60', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7 },
   hoursText:      { fontFamily: 'Manrope_500Medium', fontSize: 12, color: Colors.onPrimaryFixedVariant },
   hoursAccent:    { fontFamily: 'Manrope_700Bold', color: Colors.primary },
@@ -749,7 +754,7 @@ const styles = StyleSheet.create({
   auraContent: { padding: 16, gap: 8 },
   auraBadge: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   auraBadgeText: { fontFamily: 'Manrope_700Bold', fontSize: 11, color: Colors.primary, letterSpacing: 0.4, textTransform: 'uppercase' },
-  auraText:  { fontFamily: 'Manrope_400Regular', fontSize: 13.5, lineHeight: 20, color: Colors.onPrimaryFixedVariant },
+  auraText:  { fontFamily: 'Manrope_500Medium', fontSize: 13.5, lineHeight: 20, color: Colors.onPrimaryFixedVariant },
   auraAccent:{ fontFamily: 'Manrope_600SemiBold', color: Colors.primary },
   auraTime:  { fontFamily: 'Manrope_700Bold', color: Colors.primary },
   auraNote:  { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 },
@@ -764,7 +769,7 @@ const styles = StyleSheet.create({
   },
   emptyCommit: { alignItems: 'center', paddingVertical: 20, gap: 6 },
   emptyText:   { fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: Colors.outline },
-  emptySubText:{ fontFamily: 'Manrope_400Regular', fontSize: 12, color: Colors.outline, textAlign: 'center' },
+  emptySubText:{ fontFamily: 'Manrope_500Medium', fontSize: 12, color: Colors.outline, textAlign: 'center' },
   commitList:  { gap: 8 },
   commitRow: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
@@ -776,7 +781,7 @@ const styles = StyleSheet.create({
   commitInfo:    { flex: 1, gap: 3 },
   commitTitle:   { fontFamily: 'Manrope_600SemiBold', fontSize: 13, color: Colors.onSurface },
   commitTimeRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  commitTime:    { fontFamily: 'Manrope_400Regular', fontSize: 12, color: Colors.outline },
+  commitTime:    { fontFamily: 'Manrope_500Medium', fontSize: 12, color: Colors.outline },
   removeBtn:     { width: 24, height: 24, borderRadius: 12, backgroundColor: Colors.surfaceContainerHighest, alignItems: 'center', justifyContent: 'center' },
 
   // Deadlines
@@ -830,7 +835,7 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: Colors.surfaceContainerLow,
     borderRadius: Radius.lg, paddingHorizontal: 14, paddingVertical: 13,
-    fontFamily: 'Manrope_400Regular', fontSize: 14,
+    fontFamily: 'Manrope_500Medium', fontSize: 14,
     color: Colors.onSurface, borderWidth: 1, borderColor: Colors.outlineVariant + '40',
   },
   inputRow:       { flexDirection: 'row', gap: 12 },

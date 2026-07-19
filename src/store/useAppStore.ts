@@ -3,7 +3,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import { trackTaskCreated, trackTaskRescheduled } from '../intelligence/eventTracker';
-import { ScheduleBlock } from '../data/mockData';
+import { ScheduleBlock } from '../types/schedule';
 import { buildAndSaveUserSchedule } from '../scheduling/scheduleService';
 import { isTrialExpired } from '../monetization/trial';
 
@@ -31,6 +31,8 @@ export interface Task {
   id: string;
   text: string;
   durationMinutes: number;
+  /** Sample tasks from the first-run demo flow. */
+  isDemo?: boolean;
 }
 
 export interface Constraint {
@@ -93,6 +95,12 @@ interface AppState {
   scheduleDate:        string | null;
   /** Task IDs included in the last generated schedule (for "new task" nudges). */
   lastScheduledTaskIds: string[];
+  /** Dev: how the current schedule was built (not persisted). */
+  lastScheduleSource: 'claude' | 'local' | null;
+  lastScheduleSourceDetail: string | null;
+  /** Shown on Schedule when Pro behavioral optimization ran. */
+  lastProOptimizationSummary: string | null;
+  lastProOptimizationRules: string[];
   completedTaskIds:    string[]; // block IDs marked complete today
   skippedTaskIds:      string[]; // block IDs skipped today (with reason logged)
   wakeTime:            number;
@@ -116,6 +124,13 @@ interface AppState {
   lastEndOfDayPromptDate: string | null;
   lastAuthPromptDate:  string | null;
 
+  /** First Focus visit path: none = not chosen yet. */
+  firstRunPath:        'none' | 'demo' | 'own';
+  hasSeenDemoHandoff:  boolean;
+  hasSeenAppTour:      boolean;
+  /** When the user first opened today's demo schedule (for handoff timing). */
+  demoScheduleViewedAt: string | null;
+
   // ── Actions ─────────────────────────────────────────────────────────────────
   setHasOnboarded:     (v: boolean) => void;
   dismissWelcomeCard:  () => void;
@@ -127,7 +142,7 @@ interface AppState {
   declineTomorrowReminder: () => void;
   setOnboardingData:   (data: Partial<OnboardingData>) => void;
   setAccount:          (data: Partial<AccountProfile>) => void;
-  addTask:             (text: string, durationMinutes: number) => void;
+  addTask:             (text: string, durationMinutes: number, isDemo?: boolean) => void;
   updateTask:          (id: string, text: string, durationMinutes: number) => void;
   removeTask:          (id: string) => void;
   clearTasks:          () => void;
@@ -151,6 +166,12 @@ interface AppState {
   completeDailyReview: () => void;
   dismissEndOfDayReview: () => void;
   setLastAuthPromptDate: (date: string) => void;
+  setFirstRunPath:       (path: 'demo' | 'own') => void;
+  addDemoStarterTasks:   (tasks: Array<{ text: string; durationMinutes: number }>) => void;
+  clearDemoPlanAndTasks: () => void;
+  dismissDemoHandoff:    () => void;
+  markDemoScheduleViewed: () => void;
+  markAppTourSeen:       () => void;
   recordDayComplete:   () => void; // call when user completes ≥1 task on a given day
   clearStaleSchedule:  () => void; // wipe schedule blocks if generated on a previous day
   resetStore:          () => void;
@@ -176,6 +197,10 @@ export const useAppStore = create<AppState>()(
       scheduleBlocks:     [],
       scheduleDate:       null,
       lastScheduledTaskIds: [],
+      lastScheduleSource: null,
+      lastScheduleSourceDetail: null,
+      lastProOptimizationSummary: null,
+      lastProOptimizationRules: [],
       completedTaskIds:   [],
       skippedTaskIds:     [],
       wakeTime:           390,
@@ -194,6 +219,10 @@ export const useAppStore = create<AppState>()(
       lastDailyReviewDate:null,
       lastEndOfDayPromptDate: null,
       lastAuthPromptDate: null,
+      firstRunPath: 'none',
+      hasSeenDemoHandoff: false,
+      hasSeenAppTour: false,
+      demoScheduleViewedAt: null,
 
       setHasOnboarded:    (v) => set({ hasOnboarded: v }),
       dismissWelcomeCard: ()  => set({ hasSeenWelcomeCard: true }),
@@ -219,9 +248,17 @@ export const useAppStore = create<AppState>()(
       setOnboardingData:  (data) =>
         set((s) => ({ onboardingData: { ...s.onboardingData, ...data } })),
       setAccount: (data) => set((s) => ({ account: { ...s.account, ...data } })),
-      addTask: (text, durationMinutes) => {
-        const task = { id: Date.now().toString(), text: text.trim(), durationMinutes };
-        set((s) => ({ tasks: [...s.tasks, task] }));
+      addTask: (text, durationMinutes, isDemo = false) => {
+        const task: Task = {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          text: text.trim(),
+          durationMinutes,
+          ...(isDemo ? { isDemo: true } : {}),
+        };
+        set((s) => ({
+          tasks: [...s.tasks, task],
+          firstRunPath: s.firstRunPath === 'none' && !isDemo ? 'own' : s.firstRunPath,
+        }));
         trackTaskCreated(task);
       },
       updateTask: (id, text, durationMinutes) => {
@@ -271,7 +308,17 @@ export const useAppStore = create<AppState>()(
         }));
       },
       clearDayData: () =>
-        set({ scheduleBlocks: [], completedTaskIds: [], skippedTaskIds: [], scheduleDate: null, lastScheduledTaskIds: [] }),
+        set({
+          scheduleBlocks: [],
+          completedTaskIds: [],
+          skippedTaskIds: [],
+          scheduleDate: null,
+          lastScheduledTaskIds: [],
+          lastScheduleSource: null,
+          lastScheduleSourceDetail: null,
+          lastProOptimizationSummary: null,
+          lastProOptimizationRules: [],
+        }),
       setWakeTime: (v) => set({ wakeTime: v }),
       setSleepTime:(v) => set({ sleepTime: v }),
       setPreferences: (data) =>
@@ -281,6 +328,9 @@ export const useAppStore = create<AppState>()(
       setPremium: (v) =>
         set((s) => ({
           isPremium: v,
+          preferences: v
+            ? { ...s.preferences, advancedOptimizationEnabled: true }
+            : s.preferences,
           trial: v && s.trial.isTrialActive
             ? { ...s.trial, isTrialActive: false }
             : s.trial,
@@ -290,6 +340,7 @@ export const useAppStore = create<AppState>()(
           if (isPremium) {
             return {
               isPremium: true,
+              preferences: { ...s.preferences, advancedOptimizationEnabled: true },
               trial: {
                 isTrialActive: isTrialActive,
                 startedAt: s.trial.startedAt,
@@ -357,6 +408,49 @@ export const useAppStore = create<AppState>()(
         set({ lastEndOfDayPromptDate: today });
       },
       setLastAuthPromptDate: (date) => set({ lastAuthPromptDate: date }),
+      setFirstRunPath: (path) => set({ firstRunPath: path }),
+      addDemoStarterTasks: (starterTasks) => {
+        const demoTasks: Task[] = starterTasks.map((t, index) => ({
+          id: `demo-${Date.now()}-${index}`,
+          text: t.text,
+          durationMinutes: t.durationMinutes,
+          isDemo: true,
+        }));
+        set((s) => ({
+          firstRunPath: 'demo',
+          demoScheduleViewedAt: null,
+          tasks: [
+            ...s.tasks.filter((t) => !t.isDemo),
+            ...demoTasks.filter(
+              (dt) => !s.tasks.some((existing) => existing.text.toLowerCase() === dt.text.toLowerCase()),
+            ),
+          ],
+        }));
+        demoTasks.forEach((task) => trackTaskCreated(task));
+      },
+      clearDemoPlanAndTasks: () =>
+        set((s) => ({
+          tasks: s.tasks.filter((t) => !t.isDemo),
+          scheduleBlocks: [],
+          scheduleDate: null,
+          lastScheduledTaskIds: [],
+          completedTaskIds: [],
+          skippedTaskIds: [],
+          lastScheduleSource: null,
+          lastScheduleSourceDetail: null,
+          lastProOptimizationSummary: null,
+          lastProOptimizationRules: [],
+          hasSeenDemoHandoff: true,
+          firstRunPath: 'own',
+          demoScheduleViewedAt: null,
+        })),
+      dismissDemoHandoff: () => set({ hasSeenDemoHandoff: true }),
+      markDemoScheduleViewed: () =>
+        set((s) => {
+          if (s.demoScheduleViewedAt) return s;
+          return { demoScheduleViewedAt: new Date().toISOString() };
+        }),
+      markAppTourSeen: () => set({ hasSeenAppTour: true }),
       recordDayComplete: () => {
         const today = new Date().toISOString().split('T')[0];
         const s = useAppStore.getState();
@@ -370,7 +464,17 @@ export const useAppStore = create<AppState>()(
         const today = new Date().toISOString().split('T')[0];
         const { scheduleDate } = useAppStore.getState();
         if (scheduleDate && scheduleDate !== today) {
-          set({ scheduleBlocks: [], completedTaskIds: [], skippedTaskIds: [], scheduleDate: null, lastScheduledTaskIds: [] });
+          set({
+            scheduleBlocks: [],
+            completedTaskIds: [],
+            skippedTaskIds: [],
+            scheduleDate: null,
+            lastScheduledTaskIds: [],
+            lastScheduleSource: null,
+            lastScheduleSourceDetail: null,
+            lastProOptimizationSummary: null,
+            lastProOptimizationRules: [],
+          });
         }
       },
       resetStore: () => set({
@@ -387,6 +491,10 @@ export const useAppStore = create<AppState>()(
         scheduleBlocks:      [],
         scheduleDate:        null,
         lastScheduledTaskIds: [],
+        lastScheduleSource: null,
+        lastScheduleSourceDetail: null,
+        lastProOptimizationSummary: null,
+        lastProOptimizationRules: [],
         completedTaskIds:    [],
         skippedTaskIds:      [],
         wakeTime:            390,
@@ -405,6 +513,10 @@ export const useAppStore = create<AppState>()(
         lastDailyReviewDate: null,
         lastEndOfDayPromptDate: null,
         lastAuthPromptDate:  null,
+        firstRunPath:        'none',
+        hasSeenDemoHandoff:  false,
+        hasSeenAppTour:      false,
+        demoScheduleViewedAt: null,
       }),
     }),
     {
@@ -424,6 +536,8 @@ export const useAppStore = create<AppState>()(
         scheduleBlocks:      state.scheduleBlocks,
         scheduleDate:        state.scheduleDate,
         lastScheduledTaskIds: state.lastScheduledTaskIds,
+        lastProOptimizationSummary: state.lastProOptimizationSummary,
+        lastProOptimizationRules: state.lastProOptimizationRules,
         completedTaskIds:    state.completedTaskIds,
         skippedTaskIds:      state.skippedTaskIds,
         wakeTime:            state.wakeTime,
@@ -442,6 +556,10 @@ export const useAppStore = create<AppState>()(
         lastDailyReviewDate: state.lastDailyReviewDate,
         lastEndOfDayPromptDate: state.lastEndOfDayPromptDate,
         lastAuthPromptDate:  state.lastAuthPromptDate,
+        firstRunPath:        state.firstRunPath,
+        hasSeenDemoHandoff:  state.hasSeenDemoHandoff,
+        hasSeenAppTour:      state.hasSeenAppTour,
+        demoScheduleViewedAt: state.demoScheduleViewedAt,
       }),
       onRehydrateStorage: () => () => {
         queueMicrotask(() => {

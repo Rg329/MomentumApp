@@ -17,7 +17,7 @@ export const Typography = {
 
   // Body copy (large)
   bodyLg: {
-    fontFamily: 'Manrope_400Regular',
+    fontFamily: 'Manrope_500Medium',
     fontSize: 16,
     lineHeight: 24,
     letterSpacing: 0,
@@ -25,7 +25,7 @@ export const Typography = {
 
   // Body copy (medium)
   bodyMd: {
-    fontFamily: 'Manrope_400Regular',
+    fontFamily: 'Manrope_500Medium',
     fontSize: 13,
     lineHeight: 20,
     letterSpacing: 0,

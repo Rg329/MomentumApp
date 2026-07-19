@@ -89,9 +89,6 @@ export function FocusModeScreen({ navigation, route }: Props) {
 
   const {
     rescheduleScheduleBlock,
-    hasSeenProOffer,
-    isPremium,
-    setHasSeenProOffer,
     hasChosenCoachingStyle,
     hasSeenSavePrompt,
     hasSeenTomorrowHook,
@@ -330,12 +327,7 @@ export function FocusModeScreen({ navigation, route }: Props) {
 
   const continueAfterWin = () => {
     setTimeout(() => {
-      if (!hasSeenProOffer && !isPremium) {
-        setHasSeenProOffer(true);
-        navigation.navigate('ProOffer');
-      } else {
-        navigation.goBack();
-      }
+      navigation.goBack();
     }, 800);
   };
 
@@ -790,7 +782,7 @@ const styles = StyleSheet.create({
     marginTop: -6,
   },
   sliderRangeLabel: {
-    fontFamily: 'Manrope_400Regular',
+    fontFamily: 'Manrope_500Medium',
     fontSize: 10,
     color: Colors.outline,
   },

@@ -1,6 +1,6 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
-import type { ScheduleBlock } from '../data/mockData';
+import type { ScheduleBlock } from '../types/schedule';
 import type { NotificationStyle } from '../store/useAppStore';
 import { completeTaskWithTracking } from '../taskTracking/checkInActions';
 import { ANDROID_CHANNELS, NOTIFICATION_TYPES } from './notificationTypes';
@@ -161,6 +161,7 @@ export async function requestNotificationPermissions(): Promise<boolean> {
       allowBadge: false,
       allowSound: true,
     },
+    android: {},
   });
   return status === 'granted';
 }

@@ -166,9 +166,9 @@ export function OverloadAlertScreen({ navigation, route }: Props) {
           <View style={styles.stepBadge}>
             <Text style={styles.stepBadgeText}>Step 3 of 3</Text>
           </View>
-          <Text style={styles.title}>Capacity{'\n'}Analysis</Text>
+          <Text style={styles.title}>Your day is{'\n'}full — let's fix it</Text>
           <Text style={styles.subtitle}>
-            Momentum reviewed your schedule. Here's what it found.
+            Momentum built a realistic plan for what fits today. The rest needs trimming, not forcing.
           </Text>
         </EntryCard>
 
@@ -183,22 +183,26 @@ export function OverloadAlertScreen({ navigation, route }: Props) {
                 <MaterialCommunityIcons name="alert-circle-outline" size={22} color={Colors.primary} />
               </View>
               <View style={{ flex: 1, gap: 3 }}>
-                <Text style={styles.alertTitle}>Overload Detected</Text>
-                <Text style={styles.alertBadge}>TODAY · HIGH INTENSITY</Text>
+                <Text style={styles.alertTitle}>Too much for one day</Text>
+                <Text style={styles.alertBadge}>SMART CAP · NOT A FAILURE</Text>
               </View>
             </View>
 
             <Text style={styles.alertDesc}>
-              Your day couldn't fit{' '}
-              <Text style={styles.alertHighlight}>
-                {droppedCount} task{droppedCount !== 1 ? 's' : ''}
-              </Text>
-              {' '}—{' '}
-              <Text style={styles.alertHighlight}>{formatDuration(droppedMinutes)}</Text>
-              {' '}didn't make it onto today's schedule.{' '}
               <Text style={styles.alertHighlight}>{scheduledCount}</Text>
-              {' '}block{scheduledCount !== 1 ? 's' : ''} were scheduled.
+              {' '}block{scheduledCount !== 1 ? 's' : ''} fit your wake window, breaks, and commitments.{' '}
+              <Text style={styles.alertHighlight}>
+                {droppedCount} more task{droppedCount !== 1 ? 's' : ''}
+              </Text>
+              {' '}({formatDuration(droppedMinutes)}) would overload today — so they were left off on purpose.
             </Text>
+
+            <View style={styles.tipBox}>
+              <Text style={styles.tipTitle}>What usually works</Text>
+              <Text style={styles.tipLine}>• Keep the {scheduledCount > 0 ? 'plan that fit' : 'shortest tasks'} and finish those first</Text>
+              <Text style={styles.tipLine}>• Shorten durations if you underestimated</Text>
+              <Text style={styles.tipLine}>• Move the rest to tomorrow — a doable plan beats a heroic one</Text>
+            </View>
 
             {/* Stats */}
             <View style={styles.statsRow}>
@@ -211,7 +215,9 @@ export function OverloadAlertScreen({ navigation, route }: Props) {
 
             {/* Actions */}
             <View style={styles.actionsCol}>
-              <ActionBtn label="Remove dropped tasks and continue" icon="tune-variant"   variant="primary"   onPress={() => {
+              <ActionBtn label="View today's plan (recommended)" icon="calendar-check" variant="primary" onPress={() => navigation.navigate('MainTabs', { screen: 'Schedule' })} />
+              <ActionBtn label="Edit tasks and try again"            icon="pencil-outline" variant="secondary" onPress={() => navigation.navigate('MainTabs', { screen: 'Focus' })} />
+              <ActionBtn label="Remove dropped tasks from my list"   icon="tune-variant"   variant="ghost"     onPress={() => {
                 droppedTasks.forEach((dropped) => {
                   const match = tasks.find(
                     (t) => t.text === dropped.title || dropped.title.startsWith(t.text)
@@ -220,8 +226,6 @@ export function OverloadAlertScreen({ navigation, route }: Props) {
                 });
                 navigation.navigate('MainTabs', { screen: 'Schedule' });
               }} />
-              <ActionBtn label="Go back and edit tasks"            icon="pencil-outline" variant="secondary" onPress={() => navigation.navigate('MainTabs', { screen: 'Focus' })} />
-              <ActionBtn label="Continue with full list"           icon="check"          variant="ghost"     onPress={() => navigation.navigate('MainTabs', { screen: 'Schedule' })} />
             </View>
           </View>
         </EntryCard>
@@ -262,9 +266,11 @@ export function OverloadAlertScreen({ navigation, route }: Props) {
             </View>
             <BurnoutBar pct={sustainPct} />
             <Text style={styles.sustainNote}>
-              {scheduledCount} block{scheduledCount !== 1 ? 's' : ''} fit today, but{' '}
-              {formatDuration(droppedMinutes)} of work was left off the schedule.
-              Consider trimming your list or moving tasks to another day.
+              A sustainable day beats a perfect list.{' '}
+              {scheduledCount > 0
+                ? `You still have a real plan to follow — ${scheduledCount} block${scheduledCount !== 1 ? 's' : ''} ready on Schedule.`
+                : 'Trim your list on Focus, then generate again with shorter tasks.'}
+              {' '}Smart planning means choosing what fits, not cramming everything in.
             </Text>
           </View>
         </EntryCard>
@@ -301,6 +307,16 @@ const styles = StyleSheet.create({
   alertBadge:   { fontFamily: 'Manrope_600SemiBold', fontSize: 10, color: Colors.primary, letterSpacing: 1 },
   alertDesc:    { ...Typography.bodyMd, color: Colors.onSurfaceVariant, lineHeight: 22 },
   alertHighlight: { fontFamily: 'Manrope_700Bold', color: Colors.primary },
+  tipBox: {
+    backgroundColor: Colors.primaryFixed + '55',
+    borderRadius: Radius.lg,
+    padding: 14,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: Colors.primary + '18',
+  },
+  tipTitle: { fontFamily: 'Manrope_700Bold', fontSize: 12, color: Colors.onSurface, letterSpacing: 0.2 },
+  tipLine:  { fontFamily: 'Manrope_500Medium', fontSize: 12.5, color: Colors.onSurfaceVariant, lineHeight: 18 },
   statsRow:     { flexDirection: 'row', gap: 10 },
   divider:      { height: StyleSheet.hairlineWidth, backgroundColor: Colors.outlineVariant + '50' },
   actionsCol:   { gap: 8 },
@@ -321,7 +337,7 @@ const styles = StyleSheet.create({
   sustainHeader:  { flexDirection: 'row', alignItems: 'center', gap: 10 },
   sustainIconWrap:{ width: 36, height: 36, borderRadius: 10, backgroundColor: '#ef444412', alignItems: 'center', justifyContent: 'center' },
   sustainTitle:   { fontFamily: 'Manrope_700Bold', fontSize: 14, color: Colors.onSurface },
-  sustainSub:     { fontFamily: 'Manrope_400Regular', fontSize: 11, color: Colors.onSurfaceVariant },
+  sustainSub:     { fontFamily: 'Manrope_500Medium', fontSize: 11, color: Colors.onSurfaceVariant },
   sustainPct:     { fontFamily: 'Manrope_800ExtraBold', fontSize: 22, color: '#ef4444', letterSpacing: -0.5 },
   sustainNote:    { ...Typography.bodyMd, color: Colors.onSurfaceVariant, lineHeight: 20 },
 });

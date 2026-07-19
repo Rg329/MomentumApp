@@ -14,7 +14,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors, Typography, Spacing, Radius, Shadow } from '../theme';
 import { TopBar } from '../components/TopBar';
 import { usePersonalization } from '../personalization';
-import { ScheduleBlock } from '../data/mockData';
+import { ScheduleBlock } from '../types/schedule';
 import { useAppStore } from '../store/useAppStore';
 import { useBehavioralCoach } from '../coaching';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -24,10 +24,17 @@ import { usePremium } from '../monetization';
 import { FREE_GENERATION_LIMIT } from '../monetization/features';
 import { TomorrowHookSheet } from '../components/TomorrowHookSheet';
 import { DayReviewSheet } from '../components/DayReviewSheet';
+import { ScheduleSourceDevBadge } from '../components/ScheduleSourceDevBadge';
+import { DemoHandoffSheet } from '../components/DemoHandoffSheet';
+import { DemoTasksBanner } from '../components/DemoTasksBanner';
+import { ProOptimizationBanner } from '../components/ProOptimizationBanner';
+import { AppTourModal } from '../components/AppTourModal';
 import { formatPeakWindowLabel } from '../onboarding/tomorrowHookUtils';
+import { demoHandoffDelayRemaining } from '../onboarding/demoConfig';
 import { minutesToDisplayTime } from '../utils/formatTime';
 import { isEndOfDayWindow, todayIso } from '../utils/dayWindow';
 import { trackFunnelEvent } from '../analytics/funnelTracker';
+import { isSupabaseSignedIn } from '../auth/sessionUtils';
 import {
   ensureNotificationPermissionsIfEnabled,
   scheduleTomorrowReminderIfEnabled,
@@ -87,25 +94,76 @@ function TimeBlockItem({ block, onPress, isCompleted, isSkipped }: {
 
   // ── Insight block ──────────────────────────────────────────────────────────
   if (block.type === 'insight') {
+    const isDeadlineAnchor = block.id.startsWith('deadline-');
     return (
-      <View style={styles.insightBlock}>
-        <View style={styles.insightOrb} />
+      <View style={[styles.insightBlock, isDeadlineAnchor && styles.deadlineInsightBlock]}>
+        <View style={[styles.insightOrb, isDeadlineAnchor && styles.deadlineInsightOrb]} />
         <View style={styles.insightBadgeRow}>
-          <MaterialCommunityIcons name="star-four-points" size={10} color={Colors.primary} />
-          <Text style={styles.insightBadgeText}>Momentum Insight</Text>
+          <MaterialCommunityIcons
+            name={isDeadlineAnchor ? 'calendar-alert' : 'star-four-points'}
+            size={10}
+            color={isDeadlineAnchor ? '#b45309' : Colors.primary}
+          />
+          <Text style={[styles.insightBadgeText, isDeadlineAnchor && styles.deadlineInsightBadgeText]}>
+            {isDeadlineAnchor ? 'Deadline' : 'Momentum Insight'}
+          </Text>
         </View>
+        {!isDeadlineAnchor ? null : (
+          <Text style={styles.deadlineInsightTitle}>{block.title}</Text>
+        )}
         <Text style={styles.insightDesc}>{block.description}</Text>
-        <View style={styles.insightDots}>
-          <View style={[styles.dot, { backgroundColor: Colors.primary }]} />
-          <View style={[styles.dot, { backgroundColor: Colors.primary, opacity: 0.35 }]} />
-          <View style={[styles.dot, { backgroundColor: Colors.primary, opacity: 0.15 }]} />
-        </View>
+        {!isDeadlineAnchor && (
+          <View style={styles.insightDots}>
+            <View style={[styles.dot, { backgroundColor: Colors.primary }]} />
+            <View style={[styles.dot, { backgroundColor: Colors.primary, opacity: 0.35 }]} />
+            <View style={[styles.dot, { backgroundColor: Colors.primary, opacity: 0.15 }]} />
+          </View>
+        )}
       </View>
     );
   }
 
   // ── Standard task block ────────────────────────────────────────────────────
   const dimmed = isCompleted || isSkipped;
+  const isFixedBlock = block.id.startsWith('constraint-');
+
+  if (isFixedBlock) {
+    return (
+      <View
+        style={[
+          styles.taskBlock,
+          { borderLeftColor: accentColor, backgroundColor: accentColor + '07' },
+        ]}
+      >
+        <View style={[styles.taskOrb, { backgroundColor: accentColor + '14' }]} />
+        <View style={styles.taskHeader}>
+          <Text style={[styles.taskType, { color: accentColor }]}>{block.label}</Text>
+          <View style={[styles.taskIconBubble, { backgroundColor: accentColor + '18' }]}>
+            <MaterialCommunityIcons name={iconName} size={13} color={accentColor} />
+          </View>
+        </View>
+        <Text style={styles.taskTitle}>{block.title}</Text>
+        <Text style={styles.taskDesc} numberOfLines={2}>{block.description}</Text>
+        {(block.duration || block.tag) ? (
+          <View style={styles.taskMeta}>
+            {block.duration && (
+              <View style={[styles.metaChip, { backgroundColor: accentColor + '15' }]}>
+                <MaterialCommunityIcons name="timer-outline" size={10} color={accentColor} />
+                <Text style={[styles.metaChipText, { color: accentColor }]}>{block.duration}</Text>
+              </View>
+            )}
+            {block.tag && (
+              <View style={[styles.metaChip, { backgroundColor: Colors.surfaceContainerHigh }]}>
+                <Text style={[styles.metaChipText, { color: Colors.onSurfaceVariant }]}>
+                  {block.tag}
+                </Text>
+              </View>
+            )}
+          </View>
+        ) : null}
+      </View>
+    );
+  }
 
   return (
     <TouchableOpacity
@@ -239,7 +297,7 @@ export function DailyScheduleScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const p   = usePersonalization();
   const pm  = usePremium();
-  const { scheduleBlocks, tasks, completedTaskIds, skippedTaskIds, clearDayData, removeTask, dailyGenerations, lastGenerationDate, incrementGeneration, hasSeenTomorrowHook, acceptTomorrowReminder, declineTomorrowReminder, wakeTime, sleepTime, lastEndOfDayPromptDate, lastDailyReviewDate, dismissEndOfDayReview } = useAppStore();
+  const { scheduleBlocks, tasks, completedTaskIds, skippedTaskIds, clearDayData, removeTask, dailyGenerations, lastGenerationDate, incrementGeneration, hasSeenTomorrowHook, acceptTomorrowReminder, declineTomorrowReminder, wakeTime, sleepTime, lastEndOfDayPromptDate, lastDailyReviewDate, dismissEndOfDayReview, hasSeenDemoHandoff, clearDemoPlanAndTasks, dismissDemoHandoff, markAppTourSeen, markDemoScheduleViewed } = useAppStore();
   const scheduleDate = useAppStore((s) => s.scheduleDate);
 
   const today = new Date().toISOString().split('T')[0];
@@ -258,12 +316,33 @@ export function DailyScheduleScreen() {
   const [now, setNow] = useState(nowMinutes());
   const [showTomorrowSheet, setShowTomorrowSheet] = useState(false);
   const [showDayReview, setShowDayReview] = useState(false);
+  const [showDemoHandoff, setShowDemoHandoff] = useState(false);
+  const [showAppTour, setShowAppTour] = useState(false);
+  const hasDemoTasks = tasks.some((t) => t.isDemo);
 
   const wakeTimeLabel = minutesToDisplayTime(wakeTime);
 
   const peakWindowLabel = formatPeakWindowLabel(
     p.scheduleHints.peakFocusStartMinutes,
     p.scheduleHints.peakFocusEndMinutes,
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      if (hasSeenDemoHandoff || !hasDemoTasks || scheduleBlocks.length === 0) return;
+      if (scheduleDate !== today) return;
+
+      markDemoScheduleViewed();
+
+      const remaining = demoHandoffDelayRemaining(useAppStore.getState().demoScheduleViewedAt);
+      if (remaining <= 0) {
+        setShowDemoHandoff(true);
+        return undefined;
+      }
+
+      const timer = setTimeout(() => setShowDemoHandoff(true), remaining);
+      return () => clearTimeout(timer);
+    }, [hasSeenDemoHandoff, hasDemoTasks, scheduleBlocks.length, scheduleDate, today, markDemoScheduleViewed]),
   );
 
   useFocusEffect(
@@ -333,6 +412,43 @@ export function DailyScheduleScreen() {
   const handleTomorrowDecline = () => {
     declineTomorrowReminder();
     setShowTomorrowSheet(false);
+  };
+
+  const handleDemoClearAndFocus = async () => {
+    setShowDemoHandoff(false);
+    const signedIn = await isSupabaseSignedIn();
+    if (!signedIn) {
+      trackFunnelEvent('demo_handoff_sign_in_required');
+      navigation.navigate('Auth', { fromDemoHandoff: true });
+      return;
+    }
+    const { isPremium, hasSeenProOffer } = useAppStore.getState();
+    if (!isPremium && !hasSeenProOffer) {
+      navigation.navigate('ProOffer', { fromDemoHandoff: true });
+      return;
+    }
+    clearDemoPlanAndTasks();
+    trackFunnelEvent('demo_handoff_cleared');
+    navigation.navigate('MainTabs', { screen: 'Focus' });
+  };
+
+  const handleDemoBrowse = () => {
+    dismissDemoHandoff();
+    setShowDemoHandoff(false);
+    trackFunnelEvent('demo_handoff_browse');
+  };
+
+  const handleOpenTourFromHandoff = () => {
+    setShowDemoHandoff(false);
+    dismissDemoHandoff();
+    setShowAppTour(true);
+    trackFunnelEvent('app_tour_opened', { source: 'demo_handoff' });
+  };
+
+  const handleTourComplete = () => {
+    markAppTourSeen();
+    setShowAppTour(false);
+    navigation.navigate('MainTabs', { screen: 'Focus' });
   };
 
   useEffect(() => {
@@ -416,6 +532,11 @@ export function DailyScheduleScreen() {
 
         {/* ── Header ─────────────────────────────────────────────────────── */}
         <View style={styles.header}>
+          {__DEV__ && blocks.length > 0 && (
+            <View style={styles.devBadgeRow}>
+              <ScheduleSourceDevBadge />
+            </View>
+          )}
           <View style={styles.headerTop}>
             <View style={styles.headerKickerRow}>
               <MaterialCommunityIcons name="lightning-bolt" size={12} color={Colors.primary} />
@@ -459,6 +580,10 @@ export function DailyScheduleScreen() {
                 : 'Add tasks on the Plan tab, then generate your schedule.')}
           </Text>
         </View>
+
+        {/* ── Demo banner ────────────────────────────────────────────────── */}
+        {hasDemoTasks && blocks.length > 0 ? <DemoTasksBanner /> : null}
+        {!hasDemoTasks && blocks.length > 0 ? <ProOptimizationBanner /> : null}
 
         {/* ── Ready banner ───────────────────────────────────────────────── */}
         {showReadyBanner && (
@@ -512,6 +637,7 @@ export function DailyScheduleScreen() {
                     isSkipped={skippedTaskIds.includes(block.id)}
                     onPress={() => {
                       if (block.type === 'break' || block.type === 'insight') return;
+                      if (block.id.startsWith('constraint-') || block.id.startsWith('deadline-')) return;
                       navigation.navigate('TaskCheckIn', {
                         taskId: block.id,
                         taskTitle: block.title,
@@ -581,6 +707,19 @@ export function DailyScheduleScreen() {
         onReviewInsights={handleDayReviewInsights}
         onDismiss={handleDayReviewDismiss}
       />
+
+      <DemoHandoffSheet
+        visible={showDemoHandoff}
+        onClearAndAddOwn={handleDemoClearAndFocus}
+        onOpenTour={handleOpenTourFromHandoff}
+        onBrowseSchedule={handleDemoBrowse}
+      />
+
+      <AppTourModal
+        visible={showAppTour}
+        onClose={() => setShowAppTour(false)}
+        onComplete={handleTourComplete}
+      />
     </SafeAreaView>
   );
 }
@@ -635,7 +774,7 @@ const rolloverStyles = StyleSheet.create({
     letterSpacing: -0.4,
   },
   subtitle: {
-    fontFamily: 'Manrope_400Regular',
+    fontFamily: 'Manrope_500Medium',
     fontSize: 14,
     color: Colors.onSurfaceVariant,
     textAlign: 'center',
@@ -728,6 +867,9 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
     gap: 6,
   },
+  devBadgeRow: {
+    marginBottom: 2,
+  },
   headerTop: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -777,7 +919,7 @@ const styles = StyleSheet.create({
     textAlign: 'center', letterSpacing: -0.3,
   },
   emptySub: {
-    fontFamily: 'Manrope_400Regular',
+    fontFamily: 'Manrope_500Medium',
     fontSize: 14, color: Colors.onSurfaceVariant,
     textAlign: 'center', lineHeight: 22, maxWidth: 280,
   },
@@ -1007,7 +1149,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Manrope_700Bold',
   },
   taskDesc: {
-    fontFamily: 'Manrope_400Regular',
+    fontFamily: 'Manrope_500Medium',
     fontSize: 13,
     color: Colors.onSurfaceVariant,
     lineHeight: 20,
@@ -1060,7 +1202,7 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   breakDesc: {
-    fontFamily: 'Manrope_400Regular',
+    fontFamily: 'Manrope_500Medium',
     fontSize: 11.5,
     color: Colors.onSurfaceVariant,
     lineHeight: 16,
@@ -1097,8 +1239,24 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 1.2,
   },
+  deadlineInsightBlock: {
+    backgroundColor: '#b453090d',
+    borderColor: '#b4530925',
+  },
+  deadlineInsightOrb: {
+    backgroundColor: '#b4530912',
+  },
+  deadlineInsightBadgeText: {
+    color: '#b45309',
+  },
+  deadlineInsightTitle: {
+    fontFamily: 'Manrope_700Bold',
+    fontSize: 14,
+    color: Colors.onSurface,
+    marginBottom: 4,
+  },
   insightDesc: {
-    fontFamily: 'Manrope_400Regular',
+    fontFamily: 'Manrope_500Medium',
     fontSize: 13.5,
     color: Colors.onSurface,
     lineHeight: 22,
